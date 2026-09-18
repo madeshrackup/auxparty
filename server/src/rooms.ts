@@ -21,8 +21,10 @@ import { pickSeeds } from "./seeds.ts";
 const MAX_PLAYERS = 10;
 const PREVIEW_MS = 30_000;
 const SUBMIT_MS = 30_000;
+const MISS_SUBMIT_PENALTY = -15;
+const MISS_SUBMIT_POPUP = "-15pts penalty for not submitting a song";
 const BUZZ_MS = 12_000;
-const REVEAL_MS = 7_000;
+const REVEAL_MS = 10_000;
 const AUX_LISTEN_MS = 18_000;
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -109,6 +111,10 @@ export class Room {
   onChange: (() => void) | null = null;
   onEmpty: (() => void) | null = null;
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
+  private timerEndsAt: number | null = null;
+  private timerDurationMs = 0;
+  private popupId = 0;
+  private penaltyPopupIds = new Set<string>();
 
   constructor(code: string, host: Identity) {
     this.code = code;
@@ -132,9 +138,13 @@ export class Room {
   private clearTimers() {
     for (const t of this.timers) clearTimeout(t);
     this.timers = [];
+    this.timerEndsAt = null;
+    this.timerDurationMs = 0;
   }
 
   private later(ms: number, fn: () => void) {
+    this.timerEndsAt = Date.now() + ms;
+    this.timerDurationMs = ms;
     this.timers.push(setTimeout(fn, ms));
   }
 
@@ -160,6 +170,19 @@ export class Room {
       const p = this.player(id);
       if (p) p.score += n;
     }
+  }
+
+  private penalizeMissingSubmissions(subs: Map<string, Track>) {
+    this.penaltyPopupIds.clear();
+    const deltas: Record<string, number> = {};
+    for (const p of this.connectedPlayers()) {
+      if (subs.has(p.id)) continue;
+      deltas[p.id] = MISS_SUBMIT_PENALTY;
+      this.penaltyPopupIds.add(p.id);
+    }
+    if (this.penaltyPopupIds.size === 0) return;
+    this.popupId += 1;
+    this.award(deltas);
   }
 
   join(identity: Identity) {
@@ -276,6 +299,7 @@ export class Room {
     }
     for (const p of this.players) p.score = 0;
     this.lastDeltas = null;
+    this.penaltyPopupIds.clear();
     this.round = 0;
     this.usedTrackIds.clear();
 
@@ -296,11 +320,15 @@ export class Room {
     }
 
     if (this.mode === "impostor") {
+      this.clearTimers();
       this.impostorSubs.clear();
       this.impostorGuesses.clear();
       this.impostorOrder = [];
       this.impostorIndex = 0;
       this.phase = "impostor_submit";
+      this.later(SUBMIT_MS, () => {
+        if (this.phase === "impostor_submit") this.beginImpostorPlayback();
+      });
       this.emit();
       return;
     }
@@ -323,7 +351,7 @@ export class Room {
     this.classicOrder = [];
     this.classicIndex = 0;
     this.classicScored.clear();
-    this.lastDeltas = null;
+    if (this.penaltyPopupIds.size === 0) this.lastDeltas = null;
     this.round += 1;
     if (this.round > this.totalRounds) {
       this.finishGame();
@@ -340,6 +368,7 @@ export class Room {
   private beginClassicPlayback() {
     this.clearTimers();
     this.submitEndsAt = null;
+    this.penalizeMissingSubmissions(this.classicSubs);
     this.classicOrder = shuffle(
       [...this.classicSubs.entries()].map(([playerId, track]) => ({ playerId, track })),
     );
@@ -361,7 +390,7 @@ export class Room {
       return;
     }
     this.classicScored.clear();
-    this.lastDeltas = null;
+    if (this.classicIndex > 0) this.lastDeltas = null;
     this.playStartedAt = Date.now();
     this.roundEndsAt = Date.now() + PREVIEW_MS;
     this.phase = "classic_playing";
@@ -407,8 +436,8 @@ export class Room {
   private classicReveal() {
     this.clearTimers();
     this.phase = "classic_reveal";
-    this.emit();
     this.later(REVEAL_MS, () => this.nextClassicClip());
+    this.emit();
   }
 
   private nextClassicClip() {
@@ -521,8 +550,8 @@ export class Room {
     this.phase = "buzzer_reveal";
     this.buzzedBy = null;
     this.buzzDeadline = null;
-    this.emit();
     this.later(REVEAL_MS, () => this.advanceFromBuzzerReveal());
+    this.emit();
   }
 
   advance(playerId: string) {
@@ -599,6 +628,7 @@ export class Room {
 
   private beginImpostorPlayback() {
     this.clearTimers();
+    this.penalizeMissingSubmissions(this.impostorSubs);
     this.impostorOrder = shuffle(
       [...this.impostorSubs.entries()].map(([playerId, track]) => ({ playerId, track })),
     );
@@ -616,7 +646,7 @@ export class Room {
     }
     this.round = this.impostorIndex + 1;
     this.impostorGuesses.clear();
-    this.lastDeltas = null;
+    if (this.impostorIndex > 0) this.lastDeltas = null;
     this.playStartedAt = Date.now();
     this.roundEndsAt = Date.now() + PREVIEW_MS;
     this.phase = "impostor_playing";
@@ -670,8 +700,8 @@ export class Room {
     }
     this.award(deltas);
     this.phase = "impostor_reveal";
+    this.later(REVEAL_MS, () => this.nextImpostorOrFinish());
     this.emit();
-    this.later(REVEAL_MS + 2000, () => this.nextImpostorOrFinish());
   }
 
   private nextImpostorOrFinish() {
@@ -697,16 +727,24 @@ export class Room {
     this.auxWinnerId = null;
     this.auxEntries = [];
     this.phase = "aux_submit";
+    this.later(SUBMIT_MS, () => {
+      if (this.phase === "aux_submit") this.beginAuxListen();
+    });
     this.emit();
   }
 
   private beginAuxListen() {
     this.clearTimers();
+    this.penalizeMissingSubmissions(this.auxSubs);
     this.auxEntries = shuffle(
       [...this.auxSubs.entries()].map(([playerId, track]) => ({ playerId, track })),
     );
     this.listenIndex = 0;
     this.auxVotes.clear();
+    if (this.auxEntries.length === 0) {
+      this.nextAuxRoundOrFinish();
+      return;
+    }
     this.startAuxListenClip();
   }
 
@@ -763,8 +801,8 @@ export class Room {
     this.themeSetterId = winner;
     this.award({ [winner]: 100 });
     this.phase = "aux_reveal";
+    this.later(REVEAL_MS, () => this.nextAuxRoundOrFinish());
     this.emit();
-    this.later(REVEAL_MS + 2000, () => this.nextAuxRoundOrFinish());
   }
 
   private nextAuxRoundOrFinish() {
@@ -811,6 +849,7 @@ export class Room {
     this.auxVotes.clear();
     this.theme = "";
     this.lastDeltas = null;
+    this.penaltyPopupIds.clear();
     this.emit();
   }
 
@@ -825,12 +864,17 @@ export class Room {
       round: this.round,
       totalRounds: this.totalRounds,
       serverNow: Date.now(),
+      timerEndsAt: this.timerEndsAt,
+      timerDurationMs: this.timerDurationMs,
       queue: this.queue,
       classic: this.classicView(playerId),
       buzzer: this.buzzerView(),
       impostor: this.impostorView(playerId),
       aux: this.auxView(playerId),
       lastDeltas: this.lastDeltas,
+      popup: this.penaltyPopupIds.has(playerId)
+        ? { id: this.popupId, message: MISS_SUBMIT_POPUP }
+        : null,
     };
   }
 

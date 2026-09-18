@@ -1,32 +1,37 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function TimerBar({
-  startedAt,
+  endsAt,
   duration,
   serverNow,
-  showSeconds = true,
 }: {
-  startedAt: number | null;
+  endsAt: number | null;
   duration: number;
   serverNow: number;
-  showSeconds?: boolean;
 }) {
-  const [now, setNow] = useState(Date.now());
-  const origin = useMemo(
-    () => ({ serverNow, receivedAt: Date.now() }),
-    [serverNow],
-  );
+  const origin = useRef<{ endsAt: number; remaining: number; perf: number } | null>(null);
+  if (endsAt && (!origin.current || origin.current.endsAt !== endsAt)) {
+    origin.current = {
+      endsAt,
+      remaining: Math.max(0, endsAt - serverNow),
+      perf: performance.now(),
+    };
+  }
+  if (!endsAt) origin.current = null;
 
+  const [, setTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 100);
+    if (!endsAt) return;
+    const id = setInterval(() => setTick((n) => n + 1), 100);
     return () => clearInterval(id);
-  }, []);
+  }, [endsAt]);
 
-  if (!startedAt) return null;
+  if (!endsAt || !origin.current || duration <= 0) return null;
 
-  const estimatedServerNow = origin.serverNow + (now - origin.receivedAt);
-  const elapsed = Math.max(0, estimatedServerNow - startedAt);
-  const remaining = Math.max(0, duration - elapsed);
+  const remaining = Math.max(
+    0,
+    origin.current.remaining - (performance.now() - origin.current.perf),
+  );
   const pct = Math.max(0, Math.min(100, (remaining / duration) * 100));
   const secs = Math.max(0, Math.ceil(remaining / 1000));
   const urgent = remaining > 0 && remaining <= 5000;
@@ -36,7 +41,7 @@ export default function TimerBar({
       <div className="timer">
         <span style={{ width: `${pct}%` }} />
       </div>
-      {showSeconds && <div className="timer-secs">{secs}</div>}
+      <div className="timer-secs">{secs}</div>
     </div>
   );
 }

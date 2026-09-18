@@ -1683,6 +1683,23 @@ a.btn {
   font-weight: 700;
 }
 
+.delta.down {
+  color: #ff3b4a;
+}
+
+.penalty-modal {
+  width: min(440px, 100%);
+  text-align: center;
+  border-color: #ff3b4a;
+}
+
+.penalty-modal h2 {
+  color: #ff3b4a;
+  font-size: 28px;
+  line-height: 1.2;
+  margin: 8px 0 0;
+}
+
 .podium {
   display: flex;
   justify-content: center;

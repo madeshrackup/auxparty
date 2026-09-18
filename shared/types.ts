@@ -133,6 +133,11 @@ export type QueuedTrack = Track & {
   addedBy: string;
 };
 
+export type RoomPopup = {
+  id: number;
+  message: string;
+};
+
 export type RoomState = {
   code: string;
   youId: string;
@@ -143,12 +148,15 @@ export type RoomState = {
   round: number;
   totalRounds: number;
   serverNow: number;
+  timerEndsAt: number | null;
+  timerDurationMs: number;
   queue: QueuedTrack[];
   classic: ClassicView | null;
   buzzer: BuzzerView | null;
   impostor: ImpostorView | null;
   aux: AuxView | null;
   lastDeltas: Record<string, number> | null;
+  popup: RoomPopup | null;
 };
 
 export type AuthUser = {

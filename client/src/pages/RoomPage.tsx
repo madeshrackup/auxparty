@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { MIN_PLAYERS, type GameMode, type RoomState, type SocketAck, type Track } from "@shared/types";
+import { MIN_PLAYERS, type GameMode, type RoomPopup, type RoomState, type SocketAck, type Track } from "@shared/types";
 import Artwork from "../components/Artwork";
 import Dropdown from "../components/Dropdown";
 import Scoreboard from "../components/Scoreboard";
@@ -244,6 +244,7 @@ export default function RoomPage() {
       </div>
 
       {toast && <div className="toast">{toast}</div>}
+      <PenaltyPopup popup={state.popup} />
       {quitOpen && (
         <div className="modal-back" onClick={() => setQuitOpen(false)}>
           <div
@@ -267,6 +268,34 @@ export default function RoomPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function PenaltyPopup({ popup }: { popup: RoomPopup | null }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!popup) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    const timer = setTimeout(() => setOpen(false), 4200);
+    return () => clearTimeout(timer);
+  }, [popup?.id]);
+  if (!open || !popup) return null;
+  return (
+    <div className="modal-back penalty-back" onClick={() => setOpen(false)}>
+      <div
+        className="panel penalty-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={popup.message}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="kicker">Missed pick</div>
+        <h2>{popup.message}</h2>
+      </div>
     </div>
   );
 }
@@ -371,7 +400,6 @@ function ClassicView({
   }, [state.phase, classic?.clipIndex]);
 
   if (state.phase === "classic_submit") {
-    const startedAt = classic?.submitEndsAt ? classic.submitEndsAt - 30000 : null;
     return (
       <div className="game-layout">
         <div className="panel">
@@ -379,12 +407,13 @@ function ClassicView({
             Classic · Pick {state.round}/{state.totalRounds}
           </div>
           <h2>You have 30 seconds to pick a song</h2>
-          <p className="hint">Everyone queues one track. Then we play them one by one.</p>
+          <p className="hint">
+            Everyone queues one track. Miss the window and it's -15pts.
+          </p>
           <TimerBar
-            startedAt={startedAt}
-            duration={30000}
+            endsAt={state.timerEndsAt}
+            duration={state.timerDurationMs || 30000}
             serverNow={state.serverNow}
-            showSeconds
           />
           {classic?.yourSubmission ? (
             <p>
@@ -397,7 +426,7 @@ function ClassicView({
             Submitted {classic?.submittedIds.length || 0}/{connected}
           </p>
         </div>
-        <Scoreboard players={state.players} youId={state.youId} />
+        <Scoreboard players={state.players} youId={state.youId} deltas={state.lastDeltas} />
       </div>
     );
   }
@@ -420,10 +449,9 @@ function ClassicView({
           blurred={!reveal}
         />
         <TimerBar
-          startedAt={classic?.playStartedAt || null}
-          duration={classic?.previewMs || 30000}
+          endsAt={state.timerEndsAt}
+          duration={state.timerDurationMs || 30000}
           serverNow={state.serverNow}
-          showSeconds
         />
         {reveal ? (
           <>
@@ -501,10 +529,9 @@ function BuzzerView({
           blurred={!reveal}
         />
         <TimerBar
-          startedAt={buzzer?.playStartedAt || null}
-          duration={buzzer?.previewMs || 30000}
+          endsAt={state.timerEndsAt}
+          duration={state.timerDurationMs || 30000}
           serverNow={state.serverNow}
-          showSeconds
         />
         {reveal ? (
           <>
@@ -585,7 +612,13 @@ function ImpostorView({
           <h2>Sneak a track into the pile</h2>
           <p className="hint">
             Guilty pleasure, middle-school throwback, or a hype cut. Don't tell anyone.
+            30 seconds — miss it and it's -15pts.
           </p>
+          <TimerBar
+            endsAt={state.timerEndsAt}
+            duration={state.timerDurationMs || 30000}
+            serverNow={state.serverNow}
+          />
           {impostor?.yourSubmission ? (
             <p>
               Locked in: {impostor.yourSubmission.title} — {impostor.yourSubmission.artist}
@@ -597,7 +630,7 @@ function ImpostorView({
             Submitted {impostor?.submittedIds.length || 0}/{state.players.filter((p) => p.connected).length}
           </p>
         </div>
-        <Scoreboard players={state.players} youId={state.youId} />
+        <Scoreboard players={state.players} youId={state.youId} deltas={state.lastDeltas} />
       </div>
     );
   }
@@ -614,8 +647,8 @@ function ImpostorView({
           blurred={state.phase !== "impostor_reveal"}
         />
         <TimerBar
-          startedAt={impostor?.playStartedAt || null}
-          duration={impostor?.previewMs || 30000}
+          endsAt={state.timerEndsAt}
+          duration={state.timerDurationMs || 30000}
           serverNow={state.serverNow}
         />
         {state.phase === "impostor_reveal" && impostor?.reveal ? (
@@ -728,7 +761,7 @@ function AuxView({
             <p>Waiting for {setter?.name || "the DJ"} to set this round's prompt. Only they can choose it.</p>
           )}
         </div>
-        <Scoreboard players={state.players} youId={state.youId} />
+        <Scoreboard players={state.players} youId={state.youId} deltas={state.lastDeltas} />
       </div>
     );
   }
@@ -739,7 +772,12 @@ function AuxView({
         <div className="panel">
           <div className="kicker">Theme</div>
           <h2>{aux?.theme}</h2>
-          <p className="hint">Everyone picks a track for this theme, including the DJ.</p>
+          <p className="hint">Everyone picks a track for this theme, including the DJ. Miss the 30 seconds and it's -15pts.</p>
+          <TimerBar
+            endsAt={state.timerEndsAt}
+            duration={state.timerDurationMs || 30000}
+            serverNow={state.serverNow}
+          />
           {aux?.yourSubmission ? (
             <p>
               Your pick: {aux.yourSubmission.title} — {aux.yourSubmission.artist}
@@ -754,7 +792,7 @@ function AuxView({
             Submitted {aux?.submittedIds.length || 0}/{state.players.filter((p) => p.connected).length}
           </p>
         </div>
-        <Scoreboard players={state.players} youId={state.youId} />
+        <Scoreboard players={state.players} youId={state.youId} deltas={state.lastDeltas} />
       </div>
     );
   }
@@ -769,8 +807,8 @@ function AuxView({
           <h2>{aux?.theme}</h2>
           <Artwork src={current?.track.artworkUrl} spinning />
           <TimerBar
-            startedAt={aux?.listenStartedAt || null}
-            duration={aux?.listenMs || 18000}
+            endsAt={state.timerEndsAt}
+            duration={state.timerDurationMs || 18000}
             serverNow={state.serverNow}
           />
           <p>
@@ -783,7 +821,7 @@ function AuxView({
             </button>
           )}
         </div>
-        <Scoreboard players={state.players} youId={state.youId} />
+        <Scoreboard players={state.players} youId={state.youId} deltas={state.lastDeltas} />
       </div>
     );
   }
@@ -813,7 +851,7 @@ function AuxView({
             Votes in {aux?.votedCount}/{state.players.filter((p) => p.connected).length}
           </p>
         </div>
-        <Scoreboard players={state.players} youId={state.youId} />
+        <Scoreboard players={state.players} youId={state.youId} deltas={state.lastDeltas} />
       </div>
     );
   }
@@ -825,6 +863,11 @@ function AuxView({
         <div className="kicker">Aux awarded</div>
         <h2>{winner?.name || "Someone"} keeps the cord</h2>
         <p className="hint">{aux?.theme}</p>
+        <TimerBar
+          endsAt={state.timerEndsAt}
+          duration={state.timerDurationMs || 10000}
+          serverNow={state.serverNow}
+        />
         <div className="vote-grid">
           {aux?.entries
             ?.slice()

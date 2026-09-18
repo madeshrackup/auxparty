@@ -43,7 +43,9 @@ export default function Scoreboard({
       <div className="kicker">Players</div>
       <h2>Room</h2>
       <div className="players">
-        {ranked.map((p, i) => (
+        {ranked.map((p, i) => {
+          const delta = deltas?.[p.id];
+          return (
           <div key={p.id} className={`player ${p.connected ? "" : "off"} ${p.id === youId ? "you" : ""}`}>
             <span>
               <PlayerFace player={p} />
@@ -52,10 +54,15 @@ export default function Scoreboard({
             </span>
             <strong>
               {p.score}
-              {deltas?.[p.id] ? <span className="delta"> +{deltas[p.id]}</span> : null}
+              {delta ? (
+                <span className={`delta ${delta < 0 ? "down" : ""}`}>
+                  {delta > 0 ? `+${delta}` : delta}
+                </span>
+              ) : null}
             </strong>
           </div>
-        ))}
+          );
+        })}
       </div>
     </aside>
   );
