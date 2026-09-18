@@ -22,10 +22,14 @@ export const SUPABASE_URL = (
 ).replace(/\/$/, "");
 export const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
+export const IS_PROD = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
+
 export const APP_URL = (
   process.env.APP_URL ||
-  (process.env.VERCEL_URL ? httpsUrl(process.env.VERCEL_URL) : "http://localhost:5173")
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? httpsUrl(process.env.VERCEL_PROJECT_PRODUCTION_URL)
+    : "") ||
+  (process.env.VERCEL ? "https://auxparty.co.uk" : "http://localhost:5173")
 ).replace(/\/$/, "");
 export const EMAIL_FROM = process.env.EMAIL_FROM || "Aux Party <beth.t@example.com>";
 export const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-export const IS_PROD = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
