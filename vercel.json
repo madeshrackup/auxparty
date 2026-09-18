@@ -4,9 +4,10 @@
   "buildCommand": "npm run build -w client",
   "outputDirectory": "dist",
   "functions": {
-    "api/[...path].ts": {
-      "maxDuration": 15
-    }
+    "api/auth/register.ts": { "maxDuration": 15 },
+    "api/auth/resend-verification.ts": { "maxDuration": 15 },
+    "api/auth/verify.ts": { "maxDuration": 15 },
+    "api/music/search.ts": { "maxDuration": 15 }
   },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
