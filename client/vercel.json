@@ -4,8 +4,14 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/auth/[action].ts": { "maxDuration": 15 },
-    "api/music/search.ts": { "maxDuration": 15 }
+    "api/auth/[action].ts": {
+      "maxDuration": 15,
+      "includeFiles": "{../server/src/**,../shared/**}"
+    },
+    "api/music/search.ts": {
+      "maxDuration": 15,
+      "includeFiles": "{../server/src/**,../shared/**}"
+    }
   },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
