@@ -1,6 +1,33 @@
 import Avatar from "./Avatar";
 import type { Player } from "@shared/types";
 
+const DEVELOPER_ID = "eb7ab08a-0751-4836-ada9-270db0a3a1fd";
+
+function PlayerPills({ player }: { player: Player }) {
+  const isDeveloper = player.id === DEVELOPER_ID;
+  return (
+    <>
+      {isDeveloper ? <span className="pill developer">developer</span> : null}
+      {player.isHost ? (
+        <span className="pill host">host</span>
+      ) : !isDeveloper && player.isGuest ? (
+        <span className="pill guest">guest</span>
+      ) : null}
+    </>
+  );
+}
+
+function PlayerFace({ player, size = 40 }: { player: Player; size?: number }) {
+  if (player.avatarUrl) {
+    return (
+      <span className="player-photo" style={{ width: size, height: size }}>
+        <img src={player.avatarUrl} alt="" />
+      </span>
+    );
+  }
+  return <Avatar id={player.avatar} size={size} />;
+}
+
 export default function Scoreboard({
   players,
   youId,
@@ -17,15 +44,11 @@ export default function Scoreboard({
       <h2>Room</h2>
       <div className="players">
         {ranked.map((p, i) => (
-          <div key={p.id} className={`player ${p.connected ? "" : "off"}`}>
+          <div key={p.id} className={`player ${p.connected ? "" : "off"} ${p.id === youId ? "you" : ""}`}>
             <span>
-              <Avatar id={p.avatar} size={40} />
+              <PlayerFace player={p} />
               {i + 1}. {p.name}
-              {p.id === youId ? " (you)" : ""}
-              {p.isHost ? " · host" : ""}
-              <span className={`pill ${p.isGuest ? "guest" : "account"}`}>
-                {p.isGuest ? "guest" : "account"}
-              </span>
+              <PlayerPills player={p} />
             </span>
             <strong>
               {p.score}

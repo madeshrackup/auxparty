@@ -1394,8 +1394,61 @@ a.btn {
   color: var(--gold);
 }
 
+.pill.host {
+  color: #9be8ff;
+}
+
+.pill.developer {
+  font-family: "Times New Roman", Times, serif;
+  font-style: italic;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #ff1a1a;
+  background: #000;
+  border-color: #ff1a1a;
+  animation: developer-flare 1.4s ease-in-out infinite;
+}
+
+@keyframes developer-flare {
+  0%,
+  100% {
+    color: #ff1a1a;
+    background: #000;
+    border-color: #ff1a1a;
+    box-shadow: 0 0 0 0 rgba(255, 26, 26, 0.35);
+  }
+  50% {
+    color: #000;
+    background: #e10600;
+    border-color: #000;
+    box-shadow: 0 0 12px 2px rgba(255, 26, 26, 0.7);
+  }
+}
+
 .account {
   color: var(--ok);
+}
+
+.player-photo {
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 3px solid #fff;
+  box-shadow: 0 3px 0 var(--stroke);
+  background: #7a1ea8;
+}
+
+.player-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.player .avatar-svg {
+  flex: 0 0 auto;
+  filter: drop-shadow(0 3px 0 rgba(90, 17, 124, 0.35));
 }
 
 .room-code {

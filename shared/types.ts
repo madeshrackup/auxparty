@@ -40,6 +40,7 @@ export type Player = {
   id: string;
   name: string;
   avatar: string;
+  avatarUrl?: string | null;
   isGuest: boolean;
   score: number;
   isHost: boolean;

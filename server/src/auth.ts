@@ -53,6 +53,11 @@ export const cookieOptions = {
   path: "/",
 };
 
+export function publicAvatarUrl(path: string | null | undefined) {
+  if (!path) return null;
+  return `${SUPABASE_URL}/storage/v1/object/public/avatars/${path}`;
+}
+
 export function userPublic(user: DbUser) {
   return {
     id: user.id,
@@ -60,9 +65,7 @@ export function userPublic(user: DbUser) {
     email: user.email,
     emailVerified: Boolean(user.email_verified),
     aboutMe: user.about_me || "",
-    avatarUrl: user.avatar_path
-      ? `${SUPABASE_URL}/storage/v1/object/public/avatars/${user.avatar_path}`
-      : null,
+    avatarUrl: publicAvatarUrl(user.avatar_path),
   };
 }
 

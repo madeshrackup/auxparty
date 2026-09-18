@@ -55,6 +55,7 @@ export default function RoomPage() {
   const joiningRef = useRef(true);
 
   const name = auth.displayName.trim();
+  const photo = auth.user?.avatarUrl;
 
   useEffect(() => {
     if (!auth.ready) return;
@@ -63,7 +64,7 @@ export default function RoomPage() {
       return;
     }
     unlockAudio();
-    const sock = getSocket(name);
+    const sock = getSocket(name, false, photo);
     const onState = (next: RoomState) => {
       const nextScene = sceneOf(next.phase);
       const prevScene = sceneRef.current;
@@ -102,7 +103,7 @@ export default function RoomPage() {
       sock.off("room:state", onState);
       sock.emit("room:leave");
     };
-  }, [auth.ready, code, name, navigate]);
+  }, [auth.ready, code, name, navigate, photo]);
 
   useEffect(() => {
     if (!toast) return;
@@ -159,7 +160,7 @@ export default function RoomPage() {
 
   async function send(event: string, payload?: unknown) {
     try {
-      const sock = getSocket(name);
+      const sock = getSocket(name, false, photo);
       const res = await emitAck<SocketAck>(sock, event, payload);
       if (!res.ok) setToast(res.error || "That didn't work.");
     } catch (err) {
@@ -169,7 +170,7 @@ export default function RoomPage() {
 
   function confirmQuit() {
     stopPreview();
-    getSocket(name).emit("room:leave");
+    getSocket(name, false, photo).emit("room:leave");
     setQuitOpen(false);
     navigate("/", { viewTransition: true });
   }

@@ -11,8 +11,14 @@ export function resetSocket() {
   socket = null;
 }
 
-export function getSocket(name: string, forceGuest = false): Socket {
-  const auth = { guestId: getGuestId(), name, avatar: getAvatar(), forceGuest };
+export function getSocket(name: string, forceGuest = false, avatarUrl?: string | null): Socket {
+  const auth = {
+    guestId: getGuestId(),
+    name,
+    avatar: getAvatar(),
+    forceGuest,
+    avatarUrl: avatarUrl || undefined,
+  };
   if (!socket) {
     socket = io(SOCKET_URL || undefined, {
       withCredentials: true,

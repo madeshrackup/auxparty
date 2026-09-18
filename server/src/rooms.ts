@@ -61,6 +61,7 @@ type Identity = {
   name: string;
   isGuest: boolean;
   avatar: string;
+  avatarUrl: string | null;
 };
 
 export class Room {
@@ -115,6 +116,7 @@ export class Room {
       id: host.id,
       name: host.name,
       avatar: host.avatar,
+      avatarUrl: host.avatarUrl,
       isGuest: host.isGuest,
       score: 0,
       isHost: true,
@@ -165,6 +167,7 @@ export class Room {
       existing.connected = true;
       existing.name = identity.name;
       existing.avatar = identity.avatar;
+      existing.avatarUrl = identity.avatarUrl;
       existing.isGuest = identity.isGuest;
       if (this.emptyTimer) {
         clearTimeout(this.emptyTimer);
@@ -183,6 +186,7 @@ export class Room {
       id: identity.id,
       name: identity.name,
       avatar: identity.avatar,
+      avatarUrl: identity.avatarUrl,
       isGuest: identity.isGuest,
       score: 0,
       isHost: false,

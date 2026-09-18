@@ -4,7 +4,8 @@ import { parse as parseCookie } from "cookie";
 import { Server } from "socket.io";
 import { app } from "./app.ts";
 import { findUserBySession } from "./db.ts";
-import { APP_URL } from "./env.ts";
+import { APP_URL, SUPABASE_URL } from "./env.ts";
+import { publicAvatarUrl } from "./auth.ts";
 import { RoomManager } from "./rooms.ts";
 import type { GameMode, ImpostorGuess, LobbyPreview, Track } from "../../shared/types.ts";
 
@@ -29,11 +30,19 @@ app.get("/api/rooms", (_req, res) => {
   res.json({ rooms: rooms.listLobbies() as LobbyPreview[] });
 });
 
-type Identity = { id: string; name: string; isGuest: boolean; avatar: string };
+type Identity = { id: string; name: string; isGuest: boolean; avatar: string; avatarUrl: string | null };
 
 function avatarFromAuth(auth: Record<string, unknown>) {
   const raw = String(auth.avatar || "disco");
   return raw.slice(0, 16) || "disco";
+}
+
+function photoFromAuth(auth: Record<string, unknown>, dbPath?: string | null) {
+  const fromDb = publicAvatarUrl(dbPath);
+  if (fromDb) return fromDb;
+  const raw = String(auth.avatarUrl || "");
+  const prefix = `${SUPABASE_URL}/storage/v1/object/public/avatars/`;
+  return raw.startsWith(prefix) ? raw : null;
 }
 
 async function identityFromHandshake(socket: {
@@ -47,12 +56,18 @@ async function identityFromHandshake(socket: {
   if (sid && !forceGuest) {
     const user = await findUserBySession(sid);
     if (user?.email_verified) {
-      return { id: user.id, name: user.username, isGuest: false, avatar };
+      return {
+        id: user.id,
+        name: user.username,
+        isGuest: false,
+        avatar,
+        avatarUrl: photoFromAuth(socket.handshake.auth, user.avatar_path),
+      };
     }
   }
   const guestId = String(socket.handshake.auth.guestId || crypto.randomUUID());
   const name = String(socket.handshake.auth.name || "Guest").trim().slice(0, 20) || "Guest";
-  return { id: guestId, name, isGuest: true, avatar };
+  return { id: guestId, name, isGuest: true, avatar, avatarUrl: photoFromAuth(socket.handshake.auth) };
 }
 
 function broadcast(code: string) {
@@ -82,6 +97,7 @@ io.on("connection", async (socket) => {
       name: String(socket.handshake.auth.name || "Guest").trim().slice(0, 20) || "Guest",
       isGuest: true,
       avatar: avatarFromAuth(socket.handshake.auth),
+      avatarUrl: photoFromAuth(socket.handshake.auth),
     };
   }
   socketsByPlayer.set(identity.id, socket.id);
