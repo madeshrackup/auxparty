@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build"
+    "build": "tsc -b && vite build && rm -rf ../dist && cp -R dist ../dist"
   },
   "dependencies": {
     "react": "^19.0.0",
