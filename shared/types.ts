@@ -73,7 +73,7 @@ export type ClassicView = {
 
 export type ImpostorGuess = {
   title: string;
-  artist: string;
+  artist?: string;
   submitterId: string;
 };
 

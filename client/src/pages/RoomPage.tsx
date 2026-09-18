@@ -31,7 +31,7 @@ const MODE_COPY: Record<GameMode, { title: string; body: string }> = {
   },
   buzzer: {
     title: "Buzzer Beater",
-    body: "Buzz in, then type the title and artist before anyone else locks it.",
+    body: "Buzz in, then type the title before anyone else locks it.",
   },
   impostor: {
     title: "Who Added This?",
@@ -357,14 +357,12 @@ function ClassicView({
   onSend: (event: string, payload?: unknown) => void;
 }) {
   const [title, setTitle] = useState("");
-  const [artist, setArtist] = useState("");
   const classic = state.classic;
   const youHost = state.youId === state.hostId;
   const connected = state.players.filter((p) => p.connected).length;
 
   useEffect(() => {
     setTitle("");
-    setArtist("");
   }, [state.phase, classic?.clipIndex]);
 
   if (state.phase === "classic_submit") {
@@ -447,16 +445,12 @@ function ClassicView({
             style={{ width: "100%" }}
             onSubmit={(e) => {
               e.preventDefault();
-              onSend("game:guess", { title, artist });
+              onSend("game:guess", { title });
             }}
           >
             <div className="field">
               <label>Title</label>
               <input value={title} autoFocus onChange={(e) => setTitle(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Artist</label>
-              <input value={artist} onChange={(e) => setArtist(e.target.value)} />
             </div>
             <button className="btn btn-gold" type="submit">
               Guess
@@ -478,7 +472,6 @@ function BuzzerView({
   onSend: (event: string, payload?: unknown) => void;
 }) {
   const [title, setTitle] = useState("");
-  const [artist, setArtist] = useState("");
   const buzzer = state.buzzer;
   const you = state.youId;
   const buzzed = buzzer?.buzzedBy === you;
@@ -489,7 +482,6 @@ function BuzzerView({
 
   useEffect(() => {
     setTitle("");
-    setArtist("");
   }, [state.round, state.phase]);
 
   return (
@@ -527,16 +519,12 @@ function BuzzerView({
             style={{ width: "100%" }}
             onSubmit={(e) => {
               e.preventDefault();
-              onSend("game:guess", { title, artist });
+              onSend("game:guess", { title });
             }}
           >
             <div className="field">
               <label>Title</label>
               <input value={title} autoFocus onChange={(e) => setTitle(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Artist</label>
-              <input value={artist} onChange={(e) => setArtist(e.target.value)} />
             </div>
             <button className="btn btn-gold" type="submit">
               Lock in
@@ -577,7 +565,6 @@ function ImpostorView({
   onSend: (event: string, payload?: unknown) => void;
 }) {
   const [title, setTitle] = useState(state.impostor?.yourGuess?.title || "");
-  const [artist, setArtist] = useState(state.impostor?.yourGuess?.artist || "");
   const [submitterId, setSubmitterId] = useState(state.impostor?.yourGuess?.submitterId || "");
   const impostor = state.impostor;
 
@@ -657,17 +644,13 @@ function ImpostorView({
             style={{ width: "100%", textAlign: "left" }}
             onSubmit={(e) => {
               e.preventDefault();
-              onSend("game:guess-impostor", { title, artist, submitterId });
+              onSend("game:guess-impostor", { title, submitterId });
             }}
           >
             <div className="row">
               <div className="field">
                 <label>Title</label>
                 <input value={title} onChange={(e) => setTitle(e.target.value)} />
-              </div>
-              <div className="field">
-                <label>Artist</label>
-                <input value={artist} onChange={(e) => setArtist(e.target.value)} />
               </div>
             </div>
             <div className="field" style={{ marginTop: 10 }}>

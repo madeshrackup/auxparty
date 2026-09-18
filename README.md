@@ -23,13 +23,13 @@ Aux Party takes traditional "name that tune" trivia and turns it into a social p
 
 ### Classic
 
-Everyone has 30 seconds to pick a song from iTunes. Then the room plays each pick, one by one, with 30 seconds to guess the title and artist. Whoever guesses correctly scores **however many seconds are left** (14 seconds left = 14 points). Wrong guesses don't lock you out — keep trying until the clock hits zero.
+Everyone has 30 seconds to pick a song from iTunes. Then the room plays each pick, one by one, with 30 seconds to guess the title. Whoever guesses correctly scores **however many seconds are left** (14 seconds left = 14 points). Wrong guesses don't lock you out — keep trying until the clock hits zero.
 
 If the host sets 5 rounds, everyone gets to choose 5 songs over the game.
 
 ### Buzzer Beater
 
-A high-speed race to identify the song title and artist before anyone else beats you to the buzz. The room hears a 30-second iTunes preview. First to buzz gets a short window to type title + artist. Correct answers score fast-finger points; a miss burns you for that clip.
+A high-speed race to identify the song before anyone else beats you to the buzz. The room hears a 30-second iTunes preview. First to buzz gets a short window to type the title. Correct answers score fast-finger points; a miss burns you for that clip.
 
 If nobody queues songs in the lobby, the host still starts a mixed seed catalogue (80s/90s/pop/hip-hop/indie, etc.) from iTunes.
 

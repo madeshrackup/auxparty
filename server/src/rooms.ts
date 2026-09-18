@@ -366,7 +366,7 @@ export class Room {
     this.emit();
   }
 
-  classicGuess(playerId: string, title: string, artist: string) {
+  classicGuess(playerId: string, title: string) {
     if (this.phase !== "classic_playing") {
       throw new Error("Guessing isn't open.");
     }
@@ -379,7 +379,7 @@ export class Room {
     if (this.classicScored.has(playerId)) {
       throw new Error("You already locked this clip.");
     }
-    if (!matchesSong(title, artist, current.track.title, current.track.artist)) {
+    if (!matchesSong(title, current.track.title)) {
       throw new Error("Not quite — keep guessing.");
     }
     const remaining = Math.max(
@@ -471,13 +471,13 @@ export class Room {
     this.emit();
   }
 
-  buzzerGuess(playerId: string, title: string, artist: string) {
+  buzzerGuess(playerId: string, title: string) {
     if (this.phase !== "buzzer_buzzed" || this.buzzedBy !== playerId) {
       throw new Error("It's not your buzz.");
     }
     const track = this.buzzerTrack;
     if (!track) throw new Error("No track playing.");
-    if (matchesSong(title, artist, track.title, track.artist)) {
+    if (matchesSong(title, track.title)) {
       const remaining = Math.max(
         0,
         (this.playStartedAt || Date.now()) + PREVIEW_MS - Date.now(),
@@ -633,7 +633,7 @@ export class Room {
     if (!guess.submitterId) throw new Error("Pick who you think added it.");
     this.impostorGuesses.set(playerId, {
       title: guess.title.trim(),
-      artist: guess.artist.trim(),
+      artist: (guess.artist || "").trim(),
       submitterId: guess.submitterId,
     });
     this.emit();
@@ -649,12 +649,7 @@ export class Room {
     const deltas: Record<string, number> = {};
     let identified = 0;
     for (const [pid, guess] of this.impostorGuesses) {
-      const songOk = matchesSong(
-        guess.title,
-        guess.artist,
-        current.track.title,
-        current.track.artist,
-      );
+      const songOk = matchesSong(guess.title, current.track.title);
       const whoOk = guess.submitterId === current.playerId;
       if (songOk) {
         deltas[pid] = (deltas[pid] || 0) + 80;
@@ -922,12 +917,7 @@ export class Room {
               playerId: pid,
               playerName: this.player(pid)?.name || "Unknown",
               ...guess,
-              songOk: matchesSong(
-                guess.title,
-                guess.artist,
-                current.track.title,
-                current.track.artist,
-              ),
+              songOk: matchesSong(guess.title, current.track.title),
               whoOk: guess.submitterId === current.playerId,
             })),
           }

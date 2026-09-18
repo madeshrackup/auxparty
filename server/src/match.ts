@@ -48,11 +48,6 @@ export function isCloseMatch(guess: string, actual: string): boolean {
   return dist <= max;
 }
 
-export function matchesSong(
-  titleGuess: string,
-  artistGuess: string,
-  title: string,
-  artist: string,
-): boolean {
-  return isCloseMatch(titleGuess, title) && isCloseMatch(artistGuess, artist);
+export function matchesSong(titleGuess: string, title: string): boolean {
+  return isCloseMatch(titleGuess, title);
 }

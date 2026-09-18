@@ -32,7 +32,7 @@ const HOWTO = [
   {
     step: "3. BUZZER BEATER",
     title: "Fastest finger",
-    body: "A high-speed race to identify the song title and artist before anyone else beats you to the buzz.",
+    body: "A high-speed race to identify the song before anyone else beats you to the buzz.",
   },
   {
     step: "4. WHO ADDED THIS?",
@@ -55,7 +55,7 @@ const GAME_MODES: { id: GameMode; title: string; body: string }[] = [
   {
     id: "buzzer",
     title: "Buzzer Beater",
-    body: "First to buzz types the title and artist. Miss and you're out of that clip.",
+    body: "First to buzz types the title. Miss and you're out of that clip.",
   },
   {
     id: "impostor",

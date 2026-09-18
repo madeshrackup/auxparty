@@ -294,9 +294,9 @@ io.on("connection", (socket) => {
         const room = rooms.get(socket.data.roomCode);
         if (!room) throw new Error("You're not in a room.");
         if (room.phase === "classic_playing") {
-          room.classicGuess(identity.id, payload?.title || "", payload?.artist || "");
+          room.classicGuess(identity.id, payload?.title || "");
         } else {
-          room.buzzerGuess(identity.id, payload?.title || "", payload?.artist || "");
+          room.buzzerGuess(identity.id, payload?.title || "");
         }
         ack?.({ ok: true });
       } catch (err) {
