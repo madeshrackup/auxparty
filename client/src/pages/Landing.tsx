@@ -16,7 +16,7 @@ import { useAuth } from "../useAuth";
 import { getAvatar, nextAvatar, setAvatar, type AvatarId } from "../identity";
 import { runViewTransition } from "../transition";
 import UserMenu from "../components/UserMenu";
-import type { GameMode } from "@shared/types";
+import { MIN_PLAYERS, type GameMode } from "@shared/types";
 
 const HOWTO = [
   {
@@ -27,22 +27,22 @@ const HOWTO = [
   {
     step: "2. CLASSIC",
     title: "Pick, then guess",
-    body: "Everyone has 30 seconds to queue a song. Then each pick plays and the room has 30 seconds to name it. Remaining seconds = your points. 5 rounds means 5 picks each.",
+    body: "Everyone has 30 seconds to queue a song. Then each pick plays and the room has 30 seconds to name it. Remaining seconds = your points. 2 players minimum.",
   },
   {
     step: "3. BUZZER BEATER",
     title: "Fastest finger",
-    body: "A high-speed race to identify the song before anyone else beats you to the buzz.",
+    body: "A high-speed race to identify the song before anyone else beats you to the buzz. 2 players minimum.",
   },
   {
     step: "4. WHO ADDED THIS?",
     title: "Call out the culprit",
-    body: "Secretly submit a guilty pleasure. Points go to whoever guesses the song and which friend queued it.",
+    body: "Secretly submit a guilty pleasure. Points go to whoever guesses the song and which friend queued it. 3 players minimum.",
   },
   {
     step: "5. PASS THE AUX",
     title: "Earn the cord",
-    body: "One player picks a theme, everyone submits a track, and the room votes on who actually earned the aux.",
+    body: "One DJ sets the prompt each round. Everyone — including the DJ — picks a track and votes. 3 players minimum.",
   },
 ];
 
@@ -553,6 +553,7 @@ export default function Landing() {
                   <span className="lime-title">{mode.title}</span>
                 </span>
                 <span className="play-copy">{mode.body}</span>
+                <span className="mode-min">{MIN_PLAYERS[mode.id]} players min</span>
               </button>
             ))}
           </div>

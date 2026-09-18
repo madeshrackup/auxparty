@@ -13,6 +13,7 @@ import type {
   RoomState,
   Track,
 } from "../../shared/types.ts";
+import { MIN_PLAYERS } from "../../shared/types.ts";
 import { searchItunes, uniqueTracks } from "./itunes.ts";
 import { matchesSong } from "./match.ts";
 import { pickSeeds } from "./seeds.ts";
@@ -214,8 +215,11 @@ export class Room {
     if (remaining === 0) {
       this.emptyTimer = setTimeout(() => this.onEmpty?.(), 30_000);
     }
+    if (this.phase === "aux_theme" && this.themeSetterId === playerId) {
+      this.themeSetterId = this.connectedPlayers()[0]?.id || this.hostId;
+    }
     const inPlay = this.phase !== "lobby" && this.phase !== "podium";
-    if (inPlay && remaining < 2) {
+    if (inPlay && remaining < MIN_PLAYERS[this.mode]) {
       this.finishGame();
       return;
     }
@@ -266,8 +270,9 @@ export class Room {
   async start(playerId: string) {
     this.requireHost(playerId);
     this.requireLobby();
-    if (this.connectedPlayers().length < 2) {
-      throw new Error("Need at least 2 players to start.");
+    const min = MIN_PLAYERS[this.mode];
+    if (this.connectedPlayers().length < min) {
+      throw new Error(`Need at least ${min} players to start.`);
     }
     for (const p of this.players) p.score = 0;
     this.lastDeltas = null;
@@ -681,8 +686,8 @@ export class Room {
 
   setTheme(playerId: string, theme: string) {
     if (this.phase !== "aux_theme") throw new Error("Theme is already set.");
-    if (playerId !== this.themeSetterId && playerId !== this.hostId) {
-      throw new Error("Only the aux holder sets the theme.");
+    if (playerId !== this.themeSetterId) {
+      throw new Error("Only the DJ sets the theme this round.");
     }
     const t = theme.trim().slice(0, 80);
     if (t.length < 2) throw new Error("Give the room a real theme.");

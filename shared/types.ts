@@ -1,5 +1,12 @@
 export type GameMode = "classic" | "buzzer" | "impostor" | "aux";
 
+export const MIN_PLAYERS: Record<GameMode, number> = {
+  classic: 2,
+  buzzer: 2,
+  impostor: 3,
+  aux: 3,
+};
+
 export type RoomPhase =
   | "lobby"
   | "classic_submit"

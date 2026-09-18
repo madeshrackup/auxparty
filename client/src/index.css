@@ -1036,6 +1036,15 @@ a.text-link {
   gap: 10px;
 }
 
+.mode-min {
+  margin-top: auto;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
 .mode-glyph {
   width: 64px;
   height: 64px;
@@ -1594,6 +1603,43 @@ a.btn {
   display: block;
   height: 100%;
   background: linear-gradient(90deg, var(--lime), var(--magenta));
+  transform-origin: left center;
+}
+
+.timer-wrap.urgent .timer-secs {
+  color: #ff3b4a;
+  animation: timer-urgent 0.45s ease-in-out infinite;
+}
+
+.timer-wrap.urgent .timer {
+  border-color: #ff3b4a;
+}
+
+.timer-wrap.urgent .timer > span {
+  background: #ff3b4a;
+  animation: timer-urgent-bar 0.45s ease-in-out infinite;
+}
+
+@keyframes timer-urgent {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.25;
+    transform: scale(1.12);
+  }
+}
+
+@keyframes timer-urgent-bar {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
 }
 
 .toast {

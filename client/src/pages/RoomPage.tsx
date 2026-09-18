@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import type { GameMode, RoomState, SocketAck, Track } from "@shared/types";
+import { MIN_PLAYERS, type GameMode, type RoomState, type SocketAck, type Track } from "@shared/types";
 import Artwork from "../components/Artwork";
 import Dropdown from "../components/Dropdown";
 import Scoreboard from "../components/Scoreboard";
@@ -39,7 +39,7 @@ const MODE_COPY: Record<GameMode, { title: string; body: string }> = {
   },
   aux: {
     title: "Pass the Aux",
-    body: "A theme is set, everyone drafts a song, the room votes for the aux.",
+    body: "One DJ sets the theme each round. Everyone — including the DJ — picks a track and votes.",
   },
 };
 
@@ -280,6 +280,9 @@ function Lobby({
   youHost: boolean;
   onSend: (event: string, payload?: unknown) => void;
 }) {
+  const connected = state.players.filter((p) => p.connected).length;
+  const minPlayers = MIN_PLAYERS[state.mode];
+  const canStart = connected >= minPlayers;
   return (
     <div className="grid-2">
       <div className="panel">
@@ -290,6 +293,7 @@ function Lobby({
           <span className="kicker">Playing</span>
           <strong>{MODE_COPY[state.mode].title}</strong>
           <p>{MODE_COPY[state.mode].body}</p>
+          <p className="hint">{minPlayers} players minimum</p>
         </div>
         {youHost && (
           <div className="row" style={{ marginTop: 16 }}>
@@ -308,16 +312,17 @@ function Lobby({
             <button
               className="btn btn-primary"
               type="button"
-              disabled={state.players.filter((p) => p.connected).length < 2}
+              disabled={!canStart}
               onClick={() => onSend("game:start")}
             >
               Start {MODE_COPY[state.mode].title}
             </button>
           </div>
         )}
-        {youHost && state.players.filter((p) => p.connected).length < 2 && (
+        {youHost && !canStart && (
           <p className="hint" style={{ marginTop: 10 }}>
-            Wait for a friend to join with this code. You can't start a game solo.
+            Wait for {minPlayers - connected} more {minPlayers - connected === 1 ? "player" : "players"} to join.
+            This mode needs {minPlayers}.
           </p>
         )}
         {state.mode === "buzzer" && (
@@ -685,7 +690,7 @@ function AuxView({
   const [theme, setTheme] = useState("");
   const aux = state.aux;
   const setter = state.players.find((p) => p.id === aux?.themeSetterId);
-  const canSetTheme = state.youId === aux?.themeSetterId || state.youId === state.hostId;
+  const isDj = state.youId === aux?.themeSetterId;
   const youHost = state.youId === state.hostId;
   const current = aux?.entries?.[aux.listenIndex];
 
@@ -696,15 +701,17 @@ function AuxView({
           <div className="kicker">
             Pass the Aux · Round {state.round}/{state.totalRounds}
           </div>
-          <h2>{setter?.name || "Someone"} holds the aux</h2>
-          {canSetTheme ? (
+          <h2>{isDj ? "You're the DJ this round" : `${setter?.name || "Someone"} is the DJ`}</h2>
+          {isDj ? (
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 onSend("game:theme", { theme });
               }}
             >
-              <p className="hint">Set the vibe. Everyone has to match it.</p>
+              <p className="hint">
+                Only you set the prompt. After that, you still pick a song and vote with everyone else.
+              </p>
               <div className="field">
                 <label>Theme</label>
                 <input
@@ -718,7 +725,7 @@ function AuxView({
               </button>
             </form>
           ) : (
-            <p>Waiting for {setter?.name || "the DJ"} to call the theme.</p>
+            <p>Waiting for {setter?.name || "the DJ"} to set this round's prompt. Only they can choose it.</p>
           )}
         </div>
         <Scoreboard players={state.players} youId={state.youId} />
@@ -732,6 +739,7 @@ function AuxView({
         <div className="panel">
           <div className="kicker">Theme</div>
           <h2>{aux?.theme}</h2>
+          <p className="hint">Everyone picks a track for this theme, including the DJ.</p>
           {aux?.yourSubmission ? (
             <p>
               Your pick: {aux.yourSubmission.title} — {aux.yourSubmission.artist}
@@ -785,7 +793,7 @@ function AuxView({
       <div className="game-layout">
         <div className="panel">
           <h2>Who earned the aux?</h2>
-          <p className="hint">Vote for anyone but yourself. Theme: {aux?.theme}</p>
+          <p className="hint">Everyone votes, including the DJ. You just can't vote for your own track. Theme: {aux?.theme}</p>
           <div className="vote-grid">
             {aux?.entries?.map((entry) => (
               <button

@@ -27,23 +27,27 @@ Everyone has 30 seconds to pick a song from iTunes. Then the room plays each pic
 
 If the host sets 5 rounds, everyone gets to choose 5 songs over the game.
 
+Needs at least 2 players.
+
 ### Buzzer Beater
 
 A high-speed race to identify the song before anyone else beats you to the buzz. The room hears a 30-second iTunes preview. First to buzz gets a short window to type the title. Correct answers score fast-finger points; a miss burns you for that clip.
 
 If nobody queues songs in the lobby, the host still starts a mixed seed catalogue (80s/90s/pop/hip-hop/indie, etc.) from iTunes.
 
+Needs at least 2 players.
+
 ### Who Added This? (Impostor)
 
 Secretly submit your guilty pleasures, middle school throwbacks, or hype tracks. Each clip is anonymous. Points go to whoever guesses the song **and** correctly calls out which friend added it. The submitter sits that clip out — and scores a small bonus if fewer than half the room spots them.
 
-Needs at least 2 players.
+Needs at least 3 players.
 
 ### Pass the Aux (DJ Draft)
 
-One player picks a theme, everyone submits a track to match it, and the room votes on who actually earned the aux cord for that round. The winner sets the next theme.
+One designated DJ sets the prompt each round. Everyone — including the DJ — submits a track to match it, then everyone votes (you just can't vote for your own). The winner becomes DJ and sets the next theme.
 
-Needs at least 2 players.
+Needs at least 3 players.
 
 ## Accounts
 
