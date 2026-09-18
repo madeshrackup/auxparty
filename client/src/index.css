@@ -1,16 +1,18 @@
 :root {
   --bg: #c13ae0;
   --bg-deep: #8b1fb8;
-  --card: #9b27c9;
-  --card-2: #861eb3;
+  --card: #5b1ad4;
+  --card-2: #2c0d88;
+  --card-grad: linear-gradient(180deg, #6a24ea 0%, #3f14b6 46%, #26107a 100%);
+  --card-in: rgba(8, 0, 36, 0.5);
   --lime: #c6ff3d;
   --ink: #ffffff;
-  --muted: #f3d4ff;
+  --muted: #e9d4ff;
   --magenta: #ff4db8;
   --cyan: #3ee0ff;
   --gold: #ffd24a;
   --violet: #7a4dff;
-  --panel: #9b27c9;
+  --panel: #4e16c9;
   --line: rgba(255, 255, 255, 0.22);
   --danger: #ffd36b;
   --ok: #c6ff3d;
@@ -239,7 +241,7 @@ h2,
 }
 
 .g-card {
-  background: linear-gradient(180deg, #b13de0 0%, #8c22c0 100%);
+  background: var(--card-grad);
   border: 4px solid #fff;
   border-radius: 28px;
   padding: 18px 20px 22px;
@@ -251,7 +253,7 @@ h2,
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: linear-gradient(180deg, #b13de0 0%, #8c22c0 100%);
+  background: var(--card-grad);
   border: 4px solid #fff;
   border-radius: 28px;
   box-shadow: 0 10px 0 var(--stroke);
@@ -285,14 +287,14 @@ h2,
 }
 
 .folder-tab:first-child:not(.on) {
-  background: #6a148f;
+  background: #3a0d88;
   border-right: 4px solid #fff;
   border-bottom: 4px solid #fff;
   border-radius: 0 0 16px 0;
 }
 
 .folder-tab:last-child:not(.on) {
-  background: #6a148f;
+  background: #3a0d88;
   border-left: 4px solid #fff;
   border-bottom: 4px solid #fff;
   border-radius: 0 0 0 16px;
@@ -591,7 +593,7 @@ h2,
 
 .host-guide {
   flex: 1;
-  background: rgba(40, 8, 70, 0.28);
+  background: var(--card-in);
   border: 2px solid rgba(255, 255, 255, 0.16);
   border-radius: 18px;
   padding: 12px;
@@ -695,7 +697,7 @@ h2,
 }
 
 .how-it {
-  background: rgba(40, 8, 70, 0.28);
+  background: var(--card-in);
   border: 2px solid rgba(255, 255, 255, 0.16);
   border-radius: 18px;
   padding: 12px;
@@ -922,8 +924,8 @@ h2,
   top: 16%;
 }
 .fx-spark.s5 {
-  left: 48%;
-  top: 12%;
+  left: 72%;
+  top: 58%;
 }
 
 .fx-conf {
@@ -956,32 +958,6 @@ h2,
   bottom: 28%;
   background: #ffd24a;
   transform: rotate(-40deg);
-}
-
-.fx-spark {
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  background: #fff;
-  border-radius: 50%;
-  box-shadow: 0 0 10px #fff;
-}
-
-.fx-spark.s1 {
-  left: 12%;
-  top: 30%;
-}
-.fx-spark.s2 {
-  right: 14%;
-  top: 28%;
-}
-.fx-spark.s3 {
-  left: 18%;
-  bottom: 22%;
-}
-.fx-spark.s4 {
-  right: 30%;
-  top: 16%;
 }
 
 @keyframes eq {
@@ -1062,13 +1038,6 @@ h2,
   display: block;
 }
 
-.home-foot {
-  text-align: center;
-  margin-top: 14px;
-  font-size: 13px;
-  opacity: 0.8;
-}
-
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -1121,7 +1090,7 @@ h2,
 }
 
 .panel {
-  background: linear-gradient(180deg, #b13de0 0%, #8c22c0 100%);
+  background: var(--card-grad);
   border: 4px solid #fff;
   border-radius: 24px;
   padding: 22px;
@@ -1233,7 +1202,7 @@ input:focus {
   margin: 0;
   padding: 8px;
   list-style: none;
-  background: linear-gradient(180deg, #b13de0 0%, #8c22c0 100%);
+  background: var(--card-grad);
   border: 3px solid #fff;
   border-radius: 16px;
   box-shadow: 0 8px 0 var(--stroke);
@@ -1271,6 +1240,11 @@ input:focus {
   background: #6f1698;
   color: var(--ink);
   box-shadow: 0 4px 0 var(--stroke);
+}
+
+a.btn {
+  display: inline-block;
+  text-decoration: none;
 }
 
 .btn:hover {
@@ -1366,7 +1340,7 @@ input:focus {
 
 .mode-lock {
   margin: 16px 0;
-  background: rgba(40, 8, 70, 0.28);
+  background: var(--card-in);
   border: 2px solid rgba(255, 255, 255, 0.16);
   border-radius: 18px;
   padding: 14px 16px;

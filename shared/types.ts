@@ -147,6 +147,7 @@ export type AuthUser = {
   id: string;
   username: string;
   email?: string | null;
+  emailVerified?: boolean;
 };
 
 export type SocketAck = {

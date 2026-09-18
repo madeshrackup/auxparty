@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { getMe, login as loginApi, logout as logoutApi, register as registerApi } from "./api";
+import {
+  getMe,
+  login as loginApi,
+  logout as logoutApi,
+  register as registerApi,
+  resendVerification as resendApi,
+  verifyEmail as verifyApi,
+} from "./api";
 import { getGuestName, setGuestName as persistGuest } from "./identity";
 import { resetSocket } from "./socket";
 import type { AuthUser } from "@shared/types";
@@ -26,6 +33,7 @@ export function useAuth() {
     ready,
     error,
     setError,
+    setUser,
     setGuestName: (name: string) => {
       persistGuest(name);
       setGuest(name);
@@ -33,9 +41,8 @@ export function useAuth() {
     async register(username: string, email: string, password: string) {
       const r = await registerApi(username, email, password);
       resetSocket();
-      setUser(r.user);
       setError("");
-      return r.user;
+      return r;
     },
     async login(username: string, password: string) {
       const r = await loginApi(username, password);
@@ -43,6 +50,16 @@ export function useAuth() {
       setUser(r.user);
       setError("");
       return r.user;
+    },
+    async verifyEmail(token: string) {
+      const r = await verifyApi(token);
+      resetSocket();
+      setUser(r.user);
+      setError("");
+      return r.user;
+    },
+    async resendVerification(email: string) {
+      await resendApi(email);
     },
     async logout() {
       await logoutApi();

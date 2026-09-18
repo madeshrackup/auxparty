@@ -1,3 +1,4 @@
+import "./env.ts";
 import http from "node:http";
 import { parse as parseCookie } from "cookie";
 import cookieParser from "cookie-parser";
@@ -5,21 +6,25 @@ import cors from "cors";
 import express from "express";
 import { Server } from "socket.io";
 import {
+  AuthError,
   clearSessionCookie,
   getAuthedUser,
   loginUser,
   registerUser,
+  resendVerification,
   sessionFromRequest,
   setSessionCookie,
   userPublic,
+  verifyEmailToken,
 } from "./auth.ts";
 import { findUserBySession } from "./db.ts";
+import { APP_URL } from "./env.ts";
 import { searchItunes } from "./itunes.ts";
 import { RoomManager } from "./rooms.ts";
 import type { GameMode, ImpostorGuess, LobbyPreview, Track } from "../../shared/types.ts";
 
-const PORT = 3001;
-const ORIGIN = "http://localhost:5173";
+const PORT = Number(process.env.PORT) || 3001;
+const ORIGIN = process.env.CORS_ORIGIN || APP_URL || "http://localhost:5173";
 
 const GAME_MODES: GameMode[] = ["classic", "buzzer", "impostor", "aux"];
 
@@ -31,6 +36,15 @@ const app = express();
 app.use(cors({ origin: ORIGIN, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
+
+function authFail(res: express.Response, err: unknown, fallback: string) {
+  if (err instanceof AuthError) {
+    const status = err.code === "unverified" || err.code === "cooldown" ? 403 : 400;
+    res.status(status).json({ error: err.message, code: err.code, email: err.email });
+    return;
+  }
+  res.status(400).json({ error: err instanceof Error ? err.message : fallback });
+}
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
@@ -48,11 +62,10 @@ app.post("/api/auth/register", async (req, res) => {
       email?: string;
       password?: string;
     };
-    const { user, sid } = await registerUser(username || "", email || "", password || "");
-    setSessionCookie(res, sid);
-    res.json({ user: userPublic(user) });
+    const { email: pending } = await registerUser(username || "", email || "", password || "");
+    res.json({ pending: true, email: pending });
   } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : "Register failed." });
+    authFail(res, err, "Register failed.");
   }
 });
 
@@ -63,7 +76,28 @@ app.post("/api/auth/login", async (req, res) => {
     setSessionCookie(res, sid);
     res.json({ user: userPublic(user) });
   } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : "Login failed." });
+    authFail(res, err, "Login failed.");
+  }
+});
+
+app.post("/api/auth/verify", async (req, res) => {
+  try {
+    const token = String((req.body as { token?: string })?.token || "");
+    const { user, sid } = await verifyEmailToken(token);
+    setSessionCookie(res, sid);
+    res.json({ user: userPublic(user) });
+  } catch (err) {
+    authFail(res, err, "Verify failed.");
+  }
+});
+
+app.post("/api/auth/resend-verification", async (req, res) => {
+  try {
+    const email = String((req.body as { email?: string })?.email || "");
+    await resendVerification(email);
+    res.json({ ok: true });
+  } catch (err) {
+    authFail(res, err, "Could not resend.");
   }
 });
 
@@ -111,7 +145,7 @@ function identityFromHandshake(socket: {
   const forceGuest = Boolean(socket.handshake.auth.forceGuest);
   if (sid && !forceGuest) {
     const user = findUserBySession(sid);
-    if (user) {
+    if (user?.email_verified) {
       return { id: user.id, name: user.username, isGuest: false, avatar };
     }
   }

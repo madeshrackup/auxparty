@@ -1,4 +1,5 @@
 import { io, type Socket } from "socket.io-client";
+import { API_URL } from "./config";
 import { getAvatar, getGuestId } from "./identity";
 
 let socket: Socket | null = null;
@@ -11,7 +12,7 @@ export function resetSocket() {
 export function getSocket(name: string, forceGuest = false): Socket {
   const auth = { guestId: getGuestId(), name, avatar: getAvatar(), forceGuest };
   if (!socket) {
-    socket = io({
+    socket = io(API_URL || undefined, {
       withCredentials: true,
       auth,
     });

@@ -35,7 +35,18 @@ if (!userColumns.includes("email")) {
 if (!userColumns.includes("email_verified")) {
   db.exec("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0");
 }
+if (!userColumns.includes("email_verify_sent_at")) {
+  db.exec("ALTER TABLE users ADD COLUMN email_verify_sent_at INTEGER");
+}
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(email COLLATE NOCASE)");
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS email_tokens (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL
+  );
+`);
 
 const USER_COLS = "id, username, email, email_verified, password_hash";
 
@@ -92,4 +103,49 @@ export function findUserBySession(sessionId: string): DbUser | undefined {
 
 export function deleteSession(sessionId: string): void {
   db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+}
+
+export function markEmailVerified(userId: string): void {
+  db.prepare("UPDATE users SET email_verified = 1 WHERE id = ?").run(userId);
+}
+
+export function touchVerifySent(userId: string): void {
+  db.prepare("UPDATE users SET email_verify_sent_at = ? WHERE id = ?").run(Date.now(), userId);
+}
+
+export function getVerifySentAt(userId: string): number | null {
+  const row = db.prepare("SELECT email_verify_sent_at FROM users WHERE id = ?").get(userId) as
+    | { email_verify_sent_at: number | null }
+    | undefined;
+  return row?.email_verify_sent_at ?? null;
+}
+
+export function replaceEmailToken(userId: string, tokenHash: string, expiresAt: number): void {
+  db.prepare("DELETE FROM email_tokens WHERE user_id = ?").run(userId);
+  db.prepare("INSERT INTO email_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)").run(
+    tokenHash,
+    userId,
+    expiresAt,
+  );
+}
+
+export function findUserByEmailToken(tokenHash: string): DbUser | undefined {
+  const now = Date.now();
+  const row = db
+    .prepare(
+      `SELECT u.id, u.username, u.email, u.email_verified, u.password_hash
+       FROM email_tokens t
+       JOIN users u ON u.id = t.user_id
+       WHERE t.token_hash = ? AND t.expires_at > ?`,
+    )
+    .get(tokenHash, now) as DbUser | undefined;
+  return row;
+}
+
+export function deleteEmailToken(tokenHash: string): void {
+  db.prepare("DELETE FROM email_tokens WHERE token_hash = ?").run(tokenHash);
+}
+
+export function deleteExpiredEmailTokens(): void {
+  db.prepare("DELETE FROM email_tokens WHERE expires_at <= ?").run(Date.now());
 }

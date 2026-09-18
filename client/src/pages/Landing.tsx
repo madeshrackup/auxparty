@@ -11,6 +11,7 @@ import {
 } from "../components/PartyArt";
 import { emitAck, getSocket, resetSocket } from "../socket";
 import { unlockAudio } from "../audio";
+import { ApiError } from "../api";
 import { useAuth } from "../useAuth";
 import { getAvatar, nextAvatar, setAvatar, type AvatarId } from "../identity";
 import { runViewTransition } from "../transition";
@@ -89,6 +90,7 @@ export default function Landing() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [pendingEmail, setPendingEmail] = useState("");
 
   const name =
     tab === "auth" && auth.user ? auth.user.username.trim() : auth.guestName.trim();
@@ -166,15 +168,38 @@ export default function Landing() {
         if (password !== confirmPassword) {
           throw new Error("Passwords don't match.");
         }
-        await auth.register(username, email, password);
+        const res = await auth.register(username, email, password);
+        setPendingEmail(res.email);
         setEmail("");
         setConfirmPassword("");
-      } else {
-        await auth.login(username, password);
+        setPassword("");
+        return;
       }
-      setPassword("");
+      try {
+        await auth.login(username, password);
+        setPassword("");
+      } catch (err) {
+        if (err instanceof ApiError && err.code === "unverified" && err.email) {
+          setPendingEmail(err.email);
+        }
+        throw err;
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Auth failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendPending() {
+    if (!pendingEmail) return;
+    setBusy(true);
+    setError("");
+    try {
+      await auth.resendVerification(pendingEmail);
+      setError("Sent another email. Check your inbox.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not resend.");
     } finally {
       setBusy(false);
     }
@@ -267,6 +292,30 @@ export default function Landing() {
                   )}
                 </div>
               </div>
+            ) : pendingEmail ? (
+              <div className="auth-form">
+                <p className="lime-title">Check your inbox</p>
+                <p className="play-copy">
+                  We sent a verify link to {pendingEmail}. Open it to finish creating your account.
+                  Guest play still works while you wait.
+                </p>
+                <div className="start-row">
+                  <button className="start-btn" type="button" disabled={busy} onClick={() => void resendPending()}>
+                    Resend email
+                  </button>
+                  <button
+                    className="text-link"
+                    type="button"
+                    onClick={() => {
+                      setPendingEmail("");
+                      setError("");
+                      setAuthMode("login");
+                    }}
+                  >
+                    Back to log in
+                  </button>
+                </div>
+              </div>
             ) : (
               <form
                 className={`auth-form ${authMode === "register" ? "signup" : ""}`}
@@ -313,9 +362,22 @@ export default function Landing() {
                     onChange={(e) => setConfirmPassword(e.target.value)}
                   />
                 )}
+                {authMode === "register" && (
+                  <p className="play-copy">Password needs at least 8 characters. We’ll email you a verify link.</p>
+                )}
                 {authMode === "register" ? (
                   <div className="start-row">
-                    <button className="start-btn" disabled={busy} type="submit">
+                    <button
+                      className="start-btn"
+                      disabled={
+                        busy ||
+                        !username.trim() ||
+                        !email.trim() ||
+                        password.length < 8 ||
+                        password !== confirmPassword
+                      }
+                      type="submit"
+                    >
                       Sign up
                     </button>
                     <button
@@ -520,10 +582,6 @@ export default function Landing() {
           </button>
         </main>
       )}
-
-      <footer className="home-foot">
-        Aux Party localhost draft · no ads, no trackers, session cookie only
-      </footer>
     </div>
   );
 }
