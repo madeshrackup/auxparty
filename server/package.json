@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "email:test": "tsx scripts/send-test-email.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
