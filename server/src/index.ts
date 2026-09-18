@@ -3,7 +3,7 @@ import http from "node:http";
 import { parse as parseCookie } from "cookie";
 import { Server } from "socket.io";
 import { app } from "./app.ts";
-import { findUserById, findUserBySession } from "./db.ts";
+import { findUserBySession } from "./db.ts";
 import { APP_URL, SUPABASE_URL } from "./env.ts";
 import { publicAvatarUrl, userIdFromPlayToken } from "./auth.ts";
 import { RoomManager } from "./rooms.ts";
@@ -45,41 +45,68 @@ function photoFromAuth(auth: Record<string, unknown>, dbPath?: string | null) {
   return raw.startsWith(prefix) ? raw : null;
 }
 
-async function findUserByPlayToken(token: unknown) {
-  try {
-    const userId = userIdFromPlayToken(token);
-    if (!userId) return undefined;
-    return await findUserById(userId);
-  } catch {
-    return undefined;
-  }
+function guestIdentity(auth: Record<string, unknown>): Identity {
+  return {
+    id: String(auth.guestId || crypto.randomUUID()),
+    name: String(auth.name || "Guest").trim().slice(0, 20) || "Guest",
+    isGuest: true,
+    avatar: avatarFromAuth(auth),
+    avatarUrl: photoFromAuth(auth),
+  };
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number) {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }
 
 async function identityFromHandshake(socket: {
   handshake: { headers: { cookie?: string }; auth: Record<string, unknown> };
 }): Promise<Identity> {
-  const raw = socket.handshake.headers.cookie;
-  const parsed = raw ? parseCookie(raw) : {};
-  const avatar = avatarFromAuth(socket.handshake.auth);
-  const forceGuest = Boolean(socket.handshake.auth.forceGuest);
-  if (!forceGuest) {
-    const sid = parsed.aux_sid;
-    const fromCookie = sid ? await findUserBySession(sid) : undefined;
-    const fromToken = fromCookie ? undefined : await findUserByPlayToken(socket.handshake.auth.playToken);
-    const user = fromCookie || fromToken;
-    if (user?.email_verified) {
+  const auth = socket.handshake.auth;
+  const avatar = avatarFromAuth(auth);
+  if (!auth.forceGuest) {
+    const tokenId = userIdFromPlayToken(auth.playToken);
+    if (tokenId) {
       return {
-        id: user.id,
-        name: user.username,
+        id: tokenId,
+        name: String(auth.name || "").trim().slice(0, 20) || "Player",
         isGuest: false,
         avatar,
-        avatarUrl: photoFromAuth(socket.handshake.auth, user.avatar_path),
+        avatarUrl: photoFromAuth(auth),
       };
     }
+    const raw = socket.handshake.headers.cookie;
+    const sid = raw ? parseCookie(raw).aux_sid : undefined;
+    if (sid) {
+      try {
+        const user = await withTimeout(findUserBySession(sid), 2500);
+        if (user?.email_verified) {
+          return {
+            id: user.id,
+            name: user.username,
+            isGuest: false,
+            avatar,
+            avatarUrl: photoFromAuth(auth, user.avatar_path),
+          };
+        }
+      } catch {
+        /* fall through to guest */
+      }
+    }
   }
-  const guestId = String(socket.handshake.auth.guestId || crypto.randomUUID());
-  const name = String(socket.handshake.auth.name || "Guest").trim().slice(0, 20) || "Guest";
-  return { id: guestId, name, isGuest: true, avatar, avatarUrl: photoFromAuth(socket.handshake.auth) };
+  return guestIdentity(auth);
 }
 
 function broadcast(code: string) {
@@ -99,26 +126,23 @@ function attachRoom(room: { code: string }) {
   r.onChange = () => broadcast(r.code);
 }
 
-io.on("connection", async (socket) => {
-  let identity: Identity;
+io.use(async (socket, next) => {
   try {
-    identity = await identityFromHandshake(socket);
+    socket.data.identity = await withTimeout(identityFromHandshake(socket), 3000);
   } catch {
-    identity = {
-      id: String(socket.handshake.auth.guestId || crypto.randomUUID()),
-      name: String(socket.handshake.auth.name || "Guest").trim().slice(0, 20) || "Guest",
-      isGuest: true,
-      avatar: avatarFromAuth(socket.handshake.auth),
-      avatarUrl: photoFromAuth(socket.handshake.auth),
-    };
+    socket.data.identity = guestIdentity(socket.handshake.auth);
   }
+  next();
+});
+
+io.on("connection", (socket) => {
+  let identity: Identity = socket.data.identity || guestIdentity(socket.handshake.auth);
   socketsByPlayer.set(identity.id, socket.id);
   socket.data.playerId = identity.id;
   socket.data.roomCode = "";
 
-  socket.on("identity:update", async (payload: { name?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+  socket.on("identity:update", (payload: { name?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
     try {
-      identity = await identityFromHandshake(socket);
       if (payload?.name) {
         identity = { ...identity, name: payload.name.trim().slice(0, 20) || identity.name };
       }
@@ -141,7 +165,6 @@ io.on("connection", async (socket) => {
     "room:create",
     async (payload: { name?: string; avatar?: string; mode?: GameMode }, ack?: (a: { ok: boolean; error?: string; code?: string }) => void) => {
       try {
-        identity = await identityFromHandshake(socket);
         if (payload?.name) {
           identity = { ...identity, name: payload.name.trim().slice(0, 20) || identity.name };
         }
@@ -167,7 +190,6 @@ io.on("connection", async (socket) => {
       ack?: (a: { ok: boolean; error?: string; code?: string }) => void,
     ) => {
       try {
-        identity = await identityFromHandshake(socket);
         if (payload?.name) {
           identity = { ...identity, name: payload.name.trim().slice(0, 20) || identity.name };
         }
