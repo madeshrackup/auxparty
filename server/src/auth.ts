@@ -2,23 +2,32 @@ import { createHash, randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { Request, Response } from "express";
 import {
+  createPasswordChallenge,
   createSession,
   deleteEmailToken,
   deleteExpiredEmailTokens,
+  deletePasswordReset,
   deleteSession,
   findUserByEmail,
   findUserByEmailToken,
+  findUserById,
+  findUserByPasswordReset,
   findUserBySession,
   findUserByUsername,
   getVerifySentAt,
   insertUser,
   markEmailVerified,
   replaceEmailToken,
+  replacePasswordReset,
+  takePasswordChallenge,
   touchVerifySent,
+  updatePasswordHash,
+  updateProfile,
+  uploadAvatarFile,
   type DbUser,
 } from "./db.ts";
-import { IS_PROD } from "./env.ts";
-import { sendVerificationEmail } from "./mail.ts";
+import { IS_PROD, SUPABASE_URL } from "./env.ts";
+import { sendPasswordCodeEmail, sendPasswordResetEmail, sendVerificationEmail } from "./mail.ts";
 
 export const COOKIE = "aux_sid";
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
@@ -50,6 +59,10 @@ export function userPublic(user: DbUser) {
     username: user.username,
     email: user.email,
     emailVerified: Boolean(user.email_verified),
+    aboutMe: user.about_me || "",
+    avatarUrl: user.avatar_path
+      ? `${SUPABASE_URL}/storage/v1/object/public/avatars/${user.avatar_path}`
+      : null,
   };
 }
 
@@ -60,9 +73,13 @@ export function sessionFromRequest(req: Request): string | undefined {
 
 export async function getAuthedUserFromSid(sid?: string): Promise<DbUser | undefined> {
   if (!sid) return undefined;
-  const user = await findUserBySession(sid);
-  if (!user?.email_verified) return undefined;
-  return user;
+  try {
+    const user = await findUserBySession(sid);
+    if (!user?.email_verified) return undefined;
+    return user;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function getAuthedUser(req: Request): Promise<DbUser | undefined> {
@@ -121,6 +138,8 @@ export async function registerUser(username: string, email: string, password: st
       email: mail,
       email_verified: 0,
       password_hash: await bcrypt.hash(password, 10),
+      about_me: null,
+      avatar_path: null,
     };
     await insertUser(user);
   }
@@ -144,8 +163,7 @@ export async function verifyEmailToken(rawToken: string) {
   if (!user) throw new AuthError("That link is invalid or expired.");
   await markEmailVerified(user.id);
   await deleteEmailToken(hashed);
-  const sid = await createSession(user.id);
-  return { user: { ...user, email_verified: 1 }, sid };
+  return { user: { ...user, email_verified: 1 } };
 }
 
 export async function loginUser(username: string, password: string) {
@@ -171,4 +189,80 @@ export function setSessionCookie(res: Response, sid: string) {
 export async function clearSessionCookie(res: Response, sid?: string) {
   if (sid) await deleteSession(sid);
   res.clearCookie(COOKIE, { path: "/" });
+}
+
+const RESET_TTL_MS = 1000 * 60 * 60;
+const CODE_TTL_MS = 1000 * 60 * 10;
+
+export async function requestPasswordReset(email: string) {
+  const mail = email.trim().toLowerCase();
+  if (!EMAIL_RE.test(mail)) throw new AuthError("Enter a valid email.");
+  const user = await findUserByEmail(mail);
+  if (!user?.email_verified || !user.email) return;
+  const last = await getVerifySentAt(user.id);
+  if (last && Date.now() - last < RESEND_COOLDOWN_MS) return;
+  const raw = randomBytes(32).toString("hex");
+  await replacePasswordReset(user.id, hashToken(raw), Date.now() + RESET_TTL_MS);
+  await sendPasswordResetEmail(user.email, raw);
+  await touchVerifySent(user.id);
+}
+
+export async function completePasswordReset(rawToken: string, password: string) {
+  if (password.length < 8) throw new AuthError("Password must be at least 8 characters.");
+  const hashed = hashToken(rawToken.trim());
+  const user = await findUserByPasswordReset(hashed);
+  if (!user) throw new AuthError("That reset link is invalid or expired.");
+  await updatePasswordHash(user.id, await bcrypt.hash(password, 10));
+  await deletePasswordReset(hashed);
+}
+
+export async function saveProfile(userId: string, aboutMe: string) {
+  const text = aboutMe.trim().slice(0, 280);
+  const user = await updateProfile(userId, { about_me: text });
+  if (!user) throw new AuthError("Could not save that profile.");
+  return user;
+}
+
+export async function saveAvatar(userId: string, imageBase64: string, mime: string) {
+  const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+  if (!allowed.includes(mime)) throw new AuthError("Use a JPG, PNG, WEBP, or GIF.");
+  const raw = imageBase64.replace(/^data:[^;]+;base64,/, "");
+  const bytes = Buffer.from(raw, "base64");
+  if (bytes.length < 32) throw new AuthError("That photo looks empty.");
+  if (bytes.length > 2 * 1024 * 1024) throw new AuthError("Keep photos under 2MB.");
+  const path = await uploadAvatarFile(userId, bytes, mime);
+  const user = await updateProfile(userId, { avatar_path: path });
+  if (!user) throw new AuthError("Could not save that photo.");
+  return user;
+}
+
+export async function startPasswordChange(userId: string, oldPassword: string, newPassword: string) {
+  if (newPassword.length < 8) throw new AuthError("Password must be at least 8 characters.");
+  const user = await findUserById(userId);
+  if (!user || !(await bcrypt.compare(oldPassword, user.password_hash))) {
+    throw new AuthError("Current password is wrong.");
+  }
+  if (!user.email) throw new AuthError("This account has no email.");
+  const last = await getVerifySentAt(user.id);
+  if (last && Date.now() - last < RESEND_COOLDOWN_MS) {
+    throw new AuthError("Wait a minute before requesting another email.", "cooldown");
+  }
+  const code = String(100000 + Math.floor(Math.random() * 900000));
+  const challengeId = await createPasswordChallenge(
+    user.id,
+    hashToken(code),
+    await bcrypt.hash(newPassword, 10),
+    Date.now() + CODE_TTL_MS,
+  );
+  await sendPasswordCodeEmail(user.email, code);
+  await touchVerifySent(user.id);
+  return { challengeId };
+}
+
+export async function confirmPasswordChange(userId: string, challengeId: string, code: string) {
+  const digits = code.replace(/\D/g, "");
+  if (digits.length !== 6) throw new AuthError("Enter the 6-digit code from your email.");
+  const row = await takePasswordChallenge(challengeId.trim(), userId, hashToken(digits));
+  if (!row) throw new AuthError("That code is wrong or expired.");
+  await updatePasswordHash(row.userId, row.newPasswordHash);
 }

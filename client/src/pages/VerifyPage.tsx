@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import AccountShell from "../components/AccountShell";
 import { verifyEmail } from "../api";
 
 export default function VerifyPage() {
-  const navigate = useNavigate();
   const [params] = useSearchParams();
   const token = params.get("token") || "";
   const [status, setStatus] = useState<"working" | "ok" | "err">(token ? "working" : "err");
@@ -15,11 +15,10 @@ export default function VerifyPage() {
     if (!token) return;
     let alive = true;
     void verifyEmail(token)
-      .then((res) => {
+      .then(() => {
         if (!alive) return;
         setStatus("ok");
-        setMessage(`You're in, ${res.user.username}.`);
-        setTimeout(() => navigate("/", { viewTransition: true }), 1200);
+        setMessage("Your account is verified. Return to Aux Party to log in.");
       })
       .catch((err) => {
         if (!alive) return;
@@ -29,27 +28,21 @@ export default function VerifyPage() {
     return () => {
       alive = false;
     };
-  }, [navigate, token]);
+  }, [token]);
 
   return (
-    <div className="page">
-      <header className="topbar">
-        <Link to="/" viewTransition className="brand compact">
-          <span className="brand-mark" aria-hidden />
-          <span className="brand-name">AUX PARTY</span>
-          <span className="brand-tag">THE MUSIC QUIZ</span>
-        </Link>
-      </header>
-      <div className="panel quit-modal">
-        <div className="kicker">Account</div>
-        <h2>{status === "ok" ? "Email verified" : status === "working" ? "One second" : "Couldn't verify"}</h2>
-        <p className="hint">{message}</p>
+    <AccountShell>
+      <section className="g-card account-card">
+        <p className="lime-title">
+          {status === "ok" ? "Account verified" : status === "working" ? "One second" : "Couldn't verify"}
+        </p>
+        <p className="play-copy">{message}</p>
         {status !== "working" && (
-          <Link to="/" viewTransition className="btn btn-primary">
-            Back home
+          <Link to="/" className="start-btn" viewTransition>
+            Return to Aux Party
           </Link>
         )}
-      </div>
-    </div>
+      </section>
+    </AccountShell>
   );
 }

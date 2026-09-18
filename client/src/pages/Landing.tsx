@@ -11,10 +11,11 @@ import {
 } from "../components/PartyArt";
 import { emitAck, getSocket, resetSocket } from "../socket";
 import { unlockAudio } from "../audio";
-import { ApiError } from "../api";
+import { ApiError, forgotPassword } from "../api";
 import { useAuth } from "../useAuth";
 import { getAvatar, nextAvatar, setAvatar, type AvatarId } from "../identity";
 import { runViewTransition } from "../transition";
+import UserMenu from "../components/UserMenu";
 import type { GameMode } from "@shared/types";
 
 const HOWTO = [
@@ -89,8 +90,14 @@ export default function Landing() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [pendingEmail, setPendingEmail] = useState("");
+  const [authMode, setAuthMode] = useState<"login" | "register" | "forgot">("login");
+  const [verifyBanner, setVerifyBanner] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem("aux_verify_banner") || "";
+    if (stored) setVerifyBanner(stored);
+  }, []);
 
   const name =
     tab === "auth" && auth.user ? auth.user.username.trim() : auth.guestName.trim();
@@ -169,7 +176,9 @@ export default function Landing() {
           throw new Error("Passwords don't match.");
         }
         const res = await auth.register(username, email, password);
-        setPendingEmail(res.email);
+        sessionStorage.setItem("aux_verify_banner", res.email);
+        setVerifyBanner(res.email);
+        setAuthMode("login");
         setEmail("");
         setConfirmPassword("");
         setPassword("");
@@ -178,9 +187,12 @@ export default function Landing() {
       try {
         await auth.login(username, password);
         setPassword("");
+        sessionStorage.removeItem("aux_verify_banner");
+        setVerifyBanner("");
       } catch (err) {
         if (err instanceof ApiError && err.code === "unverified" && err.email) {
-          setPendingEmail(err.email);
+          sessionStorage.setItem("aux_verify_banner", err.email);
+          setVerifyBanner(err.email);
         }
         throw err;
       }
@@ -191,12 +203,25 @@ export default function Landing() {
     }
   }
 
-  async function resendPending() {
-    if (!pendingEmail) return;
+  async function sendForgot() {
     setBusy(true);
     setError("");
     try {
-      await auth.resendVerification(pendingEmail);
+      await forgotPassword(email);
+      setForgotSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send that email.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendPending() {
+    if (!verifyBanner) return;
+    setBusy(true);
+    setError("");
+    try {
+      await auth.resendVerification(verifyBanner);
       setError("Sent another email. Check your inbox.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not resend.");
@@ -213,6 +238,29 @@ export default function Landing() {
 
   return (
     <div className="home">
+      {verifyBanner && (
+        <div className="verify-banner" role="status">
+          <p>
+            Verify your account via the link in your email before logging in. We sent it to{" "}
+            <b>{verifyBanner}</b>.
+          </p>
+          <div className="verify-banner-actions">
+            <button type="button" className="text-link" disabled={busy} onClick={() => void resendPending()}>
+              Resend email
+            </button>
+            <button
+              type="button"
+              className="text-link"
+              onClick={() => {
+                sessionStorage.removeItem("aux_verify_banner");
+                setVerifyBanner("");
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       <header className="home-top">
         <span className="lang-pill">
           <IconGlobe /> EN
@@ -222,9 +270,13 @@ export default function Landing() {
           <span className="brand-name">AUX PARTY</span>
           <span className="brand-tag">THE MUSIC QUIZ</span>
         </Link>
-        <span className="live-pill">
-          <IconPeople /> PARTY MODE
-        </span>
+        {screen !== "identity" && auth.user ? (
+          <UserMenu />
+        ) : (
+          <span className="live-pill">
+            <IconPeople /> PARTY MODE
+          </span>
+        )}
       </header>
 
       {screen === "identity" ? (
@@ -248,6 +300,7 @@ export default function Landing() {
                   resetSocket();
                   setTab("auth");
                   setAuthMode("login");
+                  setForgotSent(false);
                 }}
               >
                 Sign up / Log in
@@ -292,36 +345,58 @@ export default function Landing() {
                   )}
                 </div>
               </div>
-            ) : pendingEmail ? (
-              <div className="auth-form">
-                <p className="lime-title">Check your inbox</p>
-                <p className="play-copy">
-                  We sent a verify link to {pendingEmail}. Open it to finish creating your account.
-                  Guest play still works while you wait.
-                </p>
+            ) : authMode === "forgot" ? (
+              <form
+                className="auth-form"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void sendForgot();
+                }}
+              >
+                <p className="lime-title">Forgot password</p>
+                {forgotSent ? (
+                  <p className="play-copy">
+                    If an account exists with that email, we sent a reset link. Open it, pick a new password,
+                    then return to Aux Party to log in.
+                  </p>
+                ) : (
+                  <>
+                    <p className="play-copy">Enter the email on your account. We'll send a reset link if it matches.</p>
+                    <input
+                      className="nick-input"
+                      type="email"
+                      placeholder="Email"
+                      autoComplete="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </>
+                )}
                 <div className="start-row">
-                  <button className="start-btn" type="button" disabled={busy} onClick={() => void resendPending()}>
-                    Resend email
-                  </button>
+                  {!forgotSent && (
+                    <button className="start-btn" disabled={busy || !email.trim()} type="submit">
+                      Send reset email
+                    </button>
+                  )}
                   <button
                     className="text-link"
                     type="button"
                     onClick={() => {
-                      setPendingEmail("");
-                      setError("");
                       setAuthMode("login");
+                      setForgotSent(false);
+                      setError("");
                     }}
                   >
                     Back to log in
                   </button>
                 </div>
-              </div>
+              </form>
             ) : (
               <form
                 className={`auth-form ${authMode === "register" ? "signup" : ""}`}
                 onSubmit={(e) => {
                   e.preventDefault();
-                  void submitAuth(authMode);
+                  void submitAuth(authMode === "register" ? "register" : "login");
                 }}
               >
                 <p className="lime-title">
@@ -392,6 +467,7 @@ export default function Landing() {
                     </button>
                   </div>
                 ) : (
+                  <>
                   <div className="start-row">
                     <button className="start-btn" disabled={busy} type="submit">
                       Log in
@@ -408,6 +484,18 @@ export default function Landing() {
                       Sign up
                     </button>
                   </div>
+                  <button
+                    className="text-link"
+                    type="button"
+                    onClick={() => {
+                      setAuthMode("forgot");
+                      setForgotSent(false);
+                      setError("");
+                    }}
+                  >
+                    Forgot password?
+                  </button>
+                  </>
                 )}
               </form>
             )}

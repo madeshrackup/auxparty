@@ -9,6 +9,7 @@ import TrackSearch from "../components/TrackSearch";
 import { playPreview, stopPreview, unlockAudio } from "../audio";
 import { emitAck, getSocket } from "../socket";
 import { useAuth } from "../useAuth";
+import UserMenu from "../components/UserMenu";
 import { getAvatar } from "../identity";
 import { runViewTransition } from "../transition";
 
@@ -219,9 +220,7 @@ export default function RoomPage() {
           <span className="brand-name">AUX PARTY</span>
           <span className="brand-tag">ROOM {state.code}</span>
         </Link>
-        <span className="you-chip">
-          {auth.user ? auth.user.username : auth.displayName}
-        </span>
+        {auth.user ? <UserMenu /> : <span className="you-chip">{auth.displayName}</span>}
       </header>
 
       <div className="screen-stage" key={sceneOf(state.phase)}>

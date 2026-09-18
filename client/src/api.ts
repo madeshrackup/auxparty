@@ -47,7 +47,7 @@ export function login(username: string, password: string) {
 }
 
 export function verifyEmail(token: string) {
-  return api<{ user: AuthUser }>("/api/auth/verify", {
+  return api<{ ok: boolean }>("/api/auth/verify", {
     method: "POST",
     body: JSON.stringify({ token }),
   });
@@ -62,6 +62,48 @@ export function resendVerification(email: string) {
 
 export function logout() {
   return api<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+}
+
+export function forgotPassword(email: string) {
+  return api<{ ok: boolean }>("/api/auth/forgot", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function resetPassword(token: string, password: string) {
+  return api<{ ok: boolean }>("/api/auth/reset", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
+  });
+}
+
+export function saveProfile(aboutMe: string) {
+  return api<{ user: AuthUser }>("/api/auth/profile", {
+    method: "POST",
+    body: JSON.stringify({ aboutMe }),
+  });
+}
+
+export function saveAvatar(image: string, mime: string) {
+  return api<{ user: AuthUser }>("/api/auth/avatar", {
+    method: "POST",
+    body: JSON.stringify({ image, mime }),
+  });
+}
+
+export function startPasswordChange(oldPassword: string, newPassword: string) {
+  return api<{ challengeId: string }>("/api/auth/password-start", {
+    method: "POST",
+    body: JSON.stringify({ oldPassword, newPassword }),
+  });
+}
+
+export function confirmPasswordChange(challengeId: string, code: string) {
+  return api<{ ok: boolean }>("/api/auth/password-confirm", {
+    method: "POST",
+    body: JSON.stringify({ challengeId, code }),
+  });
 }
 
 export function searchTracks(q: string) {

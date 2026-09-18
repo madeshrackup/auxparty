@@ -148,6 +148,8 @@ export type AuthUser = {
   username: string;
   email?: string | null;
   emailVerified?: boolean;
+  aboutMe?: string;
+  avatarUrl?: string | null;
 };
 
 export type SocketAck = {
