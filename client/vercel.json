@@ -4,13 +4,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/auth/register.ts": { "maxDuration": 15 },
-    "api/auth/resend-verification.ts": { "maxDuration": 15 },
-    "api/auth/verify.ts": { "maxDuration": 15 },
-    "api/auth/forgot.ts": { "maxDuration": 15 },
-    "api/auth/reset.ts": { "maxDuration": 15 },
-    "api/auth/avatar.ts": { "maxDuration": 15 },
-    "api/auth/password-start.ts": { "maxDuration": 15 },
+    "api/auth/[action].ts": { "maxDuration": 15 },
     "api/music/search.ts": { "maxDuration": 15 }
   },
   "rewrites": [

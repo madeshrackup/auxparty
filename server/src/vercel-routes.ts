@@ -271,3 +271,33 @@ export async function musicSearch(req: VercelRequest, res: VercelResponse) {
     res.status(502).json({ error: err instanceof Error ? err.message : "Search failed." });
   }
 }
+
+const AUTH_ACTIONS = {
+  me,
+  register,
+  login,
+  verify,
+  "resend-verification": resend,
+  logout,
+  forgot,
+  reset: resetPassword,
+  profile,
+  avatar,
+  "password-start": passwordStart,
+  "password-confirm": passwordConfirm,
+} as const;
+
+export async function authAction(req: VercelRequest, res: VercelResponse) {
+  const raw = req.query.action;
+  const action = Array.isArray(raw) ? raw[0] : raw;
+  const handler = AUTH_ACTIONS[action as keyof typeof AUTH_ACTIONS];
+  if (!handler) {
+    res.status(404).json({ error: "Not found." });
+    return;
+  }
+  try {
+    await handler(req, res);
+  } catch (err) {
+    sendAuthError(res, err, "Request failed.");
+  }
+}
