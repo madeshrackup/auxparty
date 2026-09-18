@@ -7,9 +7,14 @@
     "build": "tsc -b && vite build && rm -rf ../dist && cp -R dist ../dist"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
+    "bcryptjs": "^2.4.3",
+    "cookie": "^1.0.2",
+    "dotenv": "^18.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.5",
+    "resend": "^6.28.1",
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {

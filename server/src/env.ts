@@ -2,8 +2,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadEnv } from "dotenv";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-loadEnv({ path: path.join(root, ".env") });
+try {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+  loadEnv({ path: path.join(root, ".env") });
+} catch {
+  try {
+    loadEnv();
+  } catch {
+    /* Vercel injects env vars. */
+  }
+}
 
 function httpsUrl(host: string) {
   return host.startsWith("http") ? host : `https://${host}`;

@@ -1,7 +1,7 @@
 import { Resend } from "resend";
 import { APP_URL, EMAIL_FROM, IS_PROD, RESEND_API_KEY } from "./env.ts";
 
-const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
+const resend = () => (RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null);
 
 export async function sendVerificationEmail(to: string, token: string) {
   const verifyUrl = `${APP_URL}/verify?token=${encodeURIComponent(token)}`;
@@ -17,13 +17,13 @@ export async function sendVerificationEmail(to: string, token: string) {
     `If you didn't create an Aux Party account, you can ignore this.`,
   ].join("\n");
 
-  if (!resend) {
+  if (!resend()) {
     if (IS_PROD) throw new Error("Email isn't configured on the server.");
     console.log(`[auth] Verification link for ${to}: ${verifyUrl}`);
     return;
   }
 
-  const { error } = await resend.emails.send({
+  const { error } = await resend()!.emails.send({
     from: EMAIL_FROM,
     to,
     subject: "Confirm your Aux Party email",
@@ -34,12 +34,12 @@ export async function sendVerificationEmail(to: string, token: string) {
 }
 
 async function deliver(to: string, subject: string, html: string, text: string, previewUrl?: string) {
-  if (!resend) {
+  if (!resend()) {
     if (IS_PROD) throw new Error("Email isn't configured on the server.");
     console.log(`[auth] ${subject} for ${to}${previewUrl ? `: ${previewUrl}` : ""}`);
     return;
   }
-  const { error } = await resend.emails.send({ from: EMAIL_FROM, to, subject, html, text });
+  const { error } = await resend()!.emails.send({ from: EMAIL_FROM, to, subject, html, text });
   if (error) throw new Error(error.message || "Could not send that email.");
 }
 
