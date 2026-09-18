@@ -536,7 +536,9 @@ export default function Landing() {
         </main>
       ) : screen === "modes" ? (
         <main key="modes" className="screen-stage mode-choice">
-          <p className="lime-title mode-choice-title">Which game are we playing?</p>
+          <p className="lime-title mode-choice-title">
+            {busy ? "Starting the room…" : "Which game are we playing?"}
+          </p>
           <div className="mode-choice-grid">
             {GAME_MODES.map((mode) => (
               <button
