@@ -1,12 +1,16 @@
 {
   "name": "auxparty",
   "private": true,
-  "workspaces": ["client", "server"],
+  "workspaces": [
+    "client",
+    "server"
+  ],
   "scripts": {
     "dev": "concurrently -n api,web -c magenta,cyan \"npm run dev -w server\" \"npm run dev -w client\"",
     "build": "npm run build -w client"
   },
   "devDependencies": {
+    "@vercel/node": "^13.0.1",
     "concurrently": "^9.1.2"
   }
 }

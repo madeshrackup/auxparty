@@ -1,25 +1,10 @@
 import "./env.ts";
 import http from "node:http";
 import { parse as parseCookie } from "cookie";
-import cookieParser from "cookie-parser";
-import cors from "cors";
-import express from "express";
 import { Server } from "socket.io";
-import {
-  AuthError,
-  clearSessionCookie,
-  getAuthedUser,
-  loginUser,
-  registerUser,
-  resendVerification,
-  sessionFromRequest,
-  setSessionCookie,
-  userPublic,
-  verifyEmailToken,
-} from "./auth.ts";
+import { app } from "./app.ts";
 import { findUserBySession } from "./db.ts";
 import { APP_URL } from "./env.ts";
-import { searchItunes } from "./itunes.ts";
 import { RoomManager } from "./rooms.ts";
 import type { GameMode, ImpostorGuess, LobbyPreview, Track } from "../../shared/types.ts";
 
@@ -31,90 +16,6 @@ const GAME_MODES: GameMode[] = ["classic", "buzzer", "impostor", "aux"];
 function isGameMode(value: unknown): value is GameMode {
   return GAME_MODES.includes(value as GameMode);
 }
-
-const app = express();
-app.use(cors({ origin: ORIGIN, credentials: true }));
-app.use(express.json());
-app.use(cookieParser());
-
-function authFail(res: express.Response, err: unknown, fallback: string) {
-  if (err instanceof AuthError) {
-    const status = err.code === "unverified" || err.code === "cooldown" ? 403 : 400;
-    res.status(status).json({ error: err.message, code: err.code, email: err.email });
-    return;
-  }
-  res.status(400).json({ error: err instanceof Error ? err.message : fallback });
-}
-
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
-});
-
-app.get("/api/auth/me", (req, res) => {
-  const user = getAuthedUser(req);
-  res.json({ user: user ? userPublic(user) : null });
-});
-
-app.post("/api/auth/register", async (req, res) => {
-  try {
-    const { username, email, password } = req.body as {
-      username?: string;
-      email?: string;
-      password?: string;
-    };
-    const { email: pending } = await registerUser(username || "", email || "", password || "");
-    res.json({ pending: true, email: pending });
-  } catch (err) {
-    authFail(res, err, "Register failed.");
-  }
-});
-
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const { username, password } = req.body as { username?: string; password?: string };
-    const { user, sid } = await loginUser(username || "", password || "");
-    setSessionCookie(res, sid);
-    res.json({ user: userPublic(user) });
-  } catch (err) {
-    authFail(res, err, "Login failed.");
-  }
-});
-
-app.post("/api/auth/verify", async (req, res) => {
-  try {
-    const token = String((req.body as { token?: string })?.token || "");
-    const { user, sid } = await verifyEmailToken(token);
-    setSessionCookie(res, sid);
-    res.json({ user: userPublic(user) });
-  } catch (err) {
-    authFail(res, err, "Verify failed.");
-  }
-});
-
-app.post("/api/auth/resend-verification", async (req, res) => {
-  try {
-    const email = String((req.body as { email?: string })?.email || "");
-    await resendVerification(email);
-    res.json({ ok: true });
-  } catch (err) {
-    authFail(res, err, "Could not resend.");
-  }
-});
-
-app.post("/api/auth/logout", (req, res) => {
-  clearSessionCookie(res, sessionFromRequest(req));
-  res.json({ ok: true });
-});
-
-app.get("/api/music/search", async (req, res) => {
-  try {
-    const q = String(req.query.q || "");
-    const tracks = await searchItunes(q);
-    res.json({ tracks });
-  } catch (err) {
-    res.status(502).json({ error: err instanceof Error ? err.message : "Search failed." });
-  }
-});
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -135,16 +36,16 @@ function avatarFromAuth(auth: Record<string, unknown>) {
   return raw.slice(0, 16) || "disco";
 }
 
-function identityFromHandshake(socket: {
+async function identityFromHandshake(socket: {
   handshake: { headers: { cookie?: string }; auth: Record<string, unknown> };
-}): Identity {
+}): Promise<Identity> {
   const raw = socket.handshake.headers.cookie;
   const parsed = raw ? parseCookie(raw) : {};
   const sid = parsed.aux_sid;
   const avatar = avatarFromAuth(socket.handshake.auth);
   const forceGuest = Boolean(socket.handshake.auth.forceGuest);
   if (sid && !forceGuest) {
-    const user = findUserBySession(sid);
+    const user = await findUserBySession(sid);
     if (user?.email_verified) {
       return { id: user.id, name: user.username, isGuest: false, avatar };
     }
@@ -171,15 +72,25 @@ function attachRoom(room: { code: string }) {
   r.onChange = () => broadcast(r.code);
 }
 
-io.on("connection", (socket) => {
-  let identity = identityFromHandshake(socket);
+io.on("connection", async (socket) => {
+  let identity: Identity;
+  try {
+    identity = await identityFromHandshake(socket);
+  } catch {
+    identity = {
+      id: String(socket.handshake.auth.guestId || crypto.randomUUID()),
+      name: String(socket.handshake.auth.name || "Guest").trim().slice(0, 20) || "Guest",
+      isGuest: true,
+      avatar: avatarFromAuth(socket.handshake.auth),
+    };
+  }
   socketsByPlayer.set(identity.id, socket.id);
   socket.data.playerId = identity.id;
   socket.data.roomCode = "";
 
-  socket.on("identity:update", (payload: { name?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+  socket.on("identity:update", async (payload: { name?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
     try {
-      identity = identityFromHandshake(socket);
+      identity = await identityFromHandshake(socket);
       if (payload?.name) {
         identity = { ...identity, name: payload.name.trim().slice(0, 20) || identity.name };
       }
@@ -200,9 +111,9 @@ io.on("connection", (socket) => {
 
   socket.on(
     "room:create",
-    (payload: { name?: string; avatar?: string; mode?: GameMode }, ack?: (a: { ok: boolean; error?: string; code?: string }) => void) => {
+    async (payload: { name?: string; avatar?: string; mode?: GameMode }, ack?: (a: { ok: boolean; error?: string; code?: string }) => void) => {
       try {
-        identity = identityFromHandshake(socket);
+        identity = await identityFromHandshake(socket);
         if (payload?.name) {
           identity = { ...identity, name: payload.name.trim().slice(0, 20) || identity.name };
         }
@@ -223,12 +134,12 @@ io.on("connection", (socket) => {
 
   socket.on(
     "room:join",
-    (
+    async (
       payload: { code?: string; name?: string; avatar?: string },
       ack?: (a: { ok: boolean; error?: string; code?: string }) => void,
     ) => {
       try {
-        identity = identityFromHandshake(socket);
+        identity = await identityFromHandshake(socket);
         if (payload?.name) {
           identity = { ...identity, name: payload.name.trim().slice(0, 20) || identity.name };
         }
