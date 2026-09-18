@@ -14,7 +14,7 @@ import {
   saveAvatar,
   saveProfile,
   startPasswordChange,
-  userPublic,
+  authBody,
   verifyEmailToken,
 } from "./auth.ts";
 import { deleteSession, type DbUser } from "./db.ts";
@@ -84,7 +84,7 @@ export async function me(req: VercelRequest, res: VercelResponse) {
   }
   try {
     const user = await getAuthedUserFromSid(sidOf(req));
-    res.status(200).json({ user: user ? userPublic(user) : null });
+    res.status(200).json(authBody(user));
   } catch {
     res.status(200).json({ user: null });
   }
@@ -117,7 +117,7 @@ export async function login(req: VercelRequest, res: VercelResponse) {
     const body = bodyOf(req);
     const { user, sid } = await loginUser(String(body.username || ""), String(body.password || ""));
     attachSid(res, sid);
-    res.status(200).json({ user: userPublic(user) });
+    res.status(200).json(authBody(user));
   } catch (err) {
     sendAuthError(res, err, "Login failed.");
   }
@@ -203,7 +203,7 @@ export async function profile(req: VercelRequest, res: VercelResponse) {
     const user = await requireUser(req);
     const body = bodyOf(req);
     const next = await saveProfile(user.id, String(body.aboutMe ?? ""));
-    res.status(200).json({ user: userPublic(next) });
+    res.status(200).json(authBody(next));
   } catch (err) {
     sendAuthError(res, err, "Could not save that profile.");
   }
@@ -218,7 +218,7 @@ export async function avatar(req: VercelRequest, res: VercelResponse) {
     const user = await requireUser(req);
     const body = bodyOf(req);
     const next = await saveAvatar(user.id, String(body.image || ""), String(body.mime || "image/jpeg"));
-    res.status(200).json({ user: userPublic(next) });
+    res.status(200).json(authBody(next));
   } catch (err) {
     sendAuthError(res, err, "Could not save that photo.");
   }

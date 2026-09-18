@@ -29,7 +29,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function getMe() {
-  return api<{ user: AuthUser | null }>("/api/auth/me");
+  return api<{ user: AuthUser | null; playToken?: string | null }>("/api/auth/me");
 }
 
 export function register(username: string, email: string, password: string) {
@@ -40,7 +40,7 @@ export function register(username: string, email: string, password: string) {
 }
 
 export function login(username: string, password: string) {
-  return api<{ user: AuthUser }>("/api/auth/login", {
+  return api<{ user: AuthUser; playToken?: string | null }>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
@@ -79,14 +79,14 @@ export function resetPassword(token: string, password: string) {
 }
 
 export function saveProfile(aboutMe: string) {
-  return api<{ user: AuthUser }>("/api/auth/profile", {
+  return api<{ user: AuthUser; playToken?: string | null }>("/api/auth/profile", {
     method: "POST",
     body: JSON.stringify({ aboutMe }),
   });
 }
 
 export function saveAvatar(image: string, mime: string) {
-  return api<{ user: AuthUser }>("/api/auth/avatar", {
+  return api<{ user: AuthUser; playToken?: string | null }>("/api/auth/avatar", {
     method: "POST",
     body: JSON.stringify({ image, mime }),
   });

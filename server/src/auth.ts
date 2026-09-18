@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { Request, Response } from "express";
 import {
@@ -26,7 +26,7 @@ import {
   uploadAvatarFile,
   type DbUser,
 } from "./db.ts";
-import { IS_PROD, SUPABASE_URL } from "./env.ts";
+import { IS_PROD, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL } from "./env.ts";
 import { sendPasswordCodeEmail, sendPasswordResetEmail, sendVerificationEmail } from "./mail.ts";
 
 export const COOKIE = "aux_sid";
@@ -58,6 +58,33 @@ export function publicAvatarUrl(path: string | null | undefined) {
   return `${SUPABASE_URL}/storage/v1/object/public/avatars/${path}`;
 }
 
+function playSecret() {
+  return SUPABASE_SERVICE_ROLE_KEY || "aux-play-dev";
+}
+
+export function playTokenFor(userId: string) {
+  const exp = Date.now() + 1000 * 60 * 60 * 24 * 7;
+  const payload = `${userId}.${exp}`;
+  const sig = createHmac("sha256", playSecret()).update(payload).digest("hex");
+  return `${payload}.${sig}`;
+}
+
+export function userIdFromPlayToken(token: unknown) {
+  const raw = String(token || "");
+  const first = raw.indexOf(".");
+  const second = raw.indexOf(".", first + 1);
+  if (first < 1 || second < 0) return null;
+  const userId = raw.slice(0, first);
+  const exp = raw.slice(first + 1, second);
+  const sig = raw.slice(second + 1);
+  if (!userId || !exp || !sig || Date.now() > Number(exp)) return null;
+  const expected = createHmac("sha256", playSecret()).update(`${userId}.${exp}`).digest("hex");
+  const left = Buffer.from(sig);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length || !timingSafeEqual(left, right)) return null;
+  return userId;
+}
+
 export function userPublic(user: DbUser) {
   return {
     id: user.id,
@@ -67,6 +94,11 @@ export function userPublic(user: DbUser) {
     aboutMe: user.about_me || "",
     avatarUrl: publicAvatarUrl(user.avatar_path),
   };
+}
+
+export function authBody(user: DbUser | null | undefined) {
+  if (!user) return { user: null as null, playToken: null as null };
+  return { user: userPublic(user), playToken: playTokenFor(user.id) };
 }
 
 export function sessionFromRequest(req: Request): string | undefined {

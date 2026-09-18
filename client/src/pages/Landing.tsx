@@ -131,7 +131,7 @@ export default function Landing() {
     setError("");
     unlockAudio();
     try {
-      const sock = getSocket(name, asGuest, asGuest ? null : auth.user?.avatarUrl);
+      const sock = getSocket(name, asGuest, asGuest ? null : auth.user?.avatarUrl, asGuest ? null : auth.playToken);
       const res = await emitAck<{ ok: boolean; error?: string; code?: string }>(
         sock,
         "room:create",
@@ -152,7 +152,7 @@ export default function Landing() {
     setError("");
     unlockAudio();
     try {
-      const sock = getSocket(name, asGuest, asGuest ? null : auth.user?.avatarUrl);
+      const sock = getSocket(name, asGuest, asGuest ? null : auth.user?.avatarUrl, asGuest ? null : auth.playToken);
       const res = await emitAck<{ ok: boolean; error?: string; code?: string }>(
         sock,
         "room:join",

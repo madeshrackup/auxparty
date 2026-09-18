@@ -16,6 +16,7 @@ import type { AuthUser } from "@shared/types";
 
 type AuthState = {
   user: AuthUser | null;
+  playToken: string | null;
   guestName: string;
   displayName: string;
   ready: boolean;
@@ -37,20 +38,28 @@ const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [playToken, setPlayToken] = useState<string | null>(null);
   const [guestName, setGuest] = useState(getGuestName);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     getMe()
-      .then((r) => setUser(r.user))
-      .catch(() => setUser(null))
+      .then((r) => {
+        setUser(r.user);
+        setPlayToken(r.playToken || null);
+      })
+      .catch(() => {
+        setUser(null);
+        setPlayToken(null);
+      })
       .finally(() => setReady(true));
   }, []);
 
   const value = useMemo<AuthState>(
     () => ({
       user,
+      playToken,
       guestName,
       displayName: user?.username || guestName,
       ready,
@@ -71,6 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const r = await loginApi(username, password);
         resetSocket();
         setUser(r.user);
+        setPlayToken(r.playToken || null);
         setError("");
         return r.user;
       },
@@ -80,11 +90,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async saveProfile(aboutMe: string) {
         const r = await saveProfileApi(aboutMe);
         setUser(r.user);
+        if (r.playToken) setPlayToken(r.playToken);
         return r.user;
       },
       async saveAvatar(image: string, mime: string) {
         const r = await saveAvatarApi(image, mime);
         setUser(r.user);
+        if (r.playToken) setPlayToken(r.playToken);
         return r.user;
       },
       async startPasswordChange(oldPassword: string, newPassword: string) {
@@ -97,9 +109,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await logoutApi();
         resetSocket();
         setUser(null);
+        setPlayToken(null);
       },
     }),
-    [error, guestName, ready, user],
+    [error, guestName, playToken, ready, user],
   );
 
   return createElement(AuthContext.Provider, { value }, children);

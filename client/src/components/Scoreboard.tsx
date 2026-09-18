@@ -4,13 +4,13 @@ import type { Player } from "@shared/types";
 const DEVELOPER_ID = "eb7ab08a-0751-4836-ada9-270db0a3a1fd";
 
 function PlayerPills({ player }: { player: Player }) {
-  const isDeveloper = player.id === DEVELOPER_ID;
+  const developer = player.id === DEVELOPER_ID;
   return (
     <>
-      {isDeveloper ? <span className="pill developer">developer</span> : null}
+      {developer ? <span className="pill developer">developer</span> : null}
       {player.isHost ? (
         <span className="pill host">host</span>
-      ) : !isDeveloper && player.isGuest ? (
+      ) : !developer && player.isGuest ? (
         <span className="pill guest">guest</span>
       ) : null}
     </>

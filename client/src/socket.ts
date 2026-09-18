@@ -11,13 +11,19 @@ export function resetSocket() {
   socket = null;
 }
 
-export function getSocket(name: string, forceGuest = false, avatarUrl?: string | null): Socket {
+export function getSocket(
+  name: string,
+  forceGuest = false,
+  avatarUrl?: string | null,
+  playToken?: string | null,
+): Socket {
   const auth = {
     guestId: getGuestId(),
     name,
     avatar: getAvatar(),
     forceGuest,
     avatarUrl: avatarUrl || undefined,
+    playToken: forceGuest ? undefined : playToken || undefined,
   };
   if (!socket) {
     socket = io(SOCKET_URL || undefined, {
@@ -29,8 +35,13 @@ export function getSocket(name: string, forceGuest = false, avatarUrl?: string |
     });
     return socket;
   }
+  const changed = JSON.stringify(socket.auth) !== JSON.stringify(auth);
   socket.auth = auth;
-  if (!socket.connected) socket.connect();
+  if (changed && socket.connected) {
+    socket.disconnect().connect();
+  } else if (!socket.connected) {
+    socket.connect();
+  }
   return socket;
 }
 

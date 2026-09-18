@@ -3,9 +3,9 @@ import http from "node:http";
 import { parse as parseCookie } from "cookie";
 import { Server } from "socket.io";
 import { app } from "./app.ts";
-import { findUserBySession } from "./db.ts";
+import { findUserById, findUserBySession } from "./db.ts";
 import { APP_URL, SUPABASE_URL } from "./env.ts";
-import { publicAvatarUrl } from "./auth.ts";
+import { publicAvatarUrl, userIdFromPlayToken } from "./auth.ts";
 import { RoomManager } from "./rooms.ts";
 import type { GameMode, ImpostorGuess, LobbyPreview, Track } from "../../shared/types.ts";
 
@@ -45,16 +45,28 @@ function photoFromAuth(auth: Record<string, unknown>, dbPath?: string | null) {
   return raw.startsWith(prefix) ? raw : null;
 }
 
+async function findUserByPlayToken(token: unknown) {
+  try {
+    const userId = userIdFromPlayToken(token);
+    if (!userId) return undefined;
+    return await findUserById(userId);
+  } catch {
+    return undefined;
+  }
+}
+
 async function identityFromHandshake(socket: {
   handshake: { headers: { cookie?: string }; auth: Record<string, unknown> };
 }): Promise<Identity> {
   const raw = socket.handshake.headers.cookie;
   const parsed = raw ? parseCookie(raw) : {};
-  const sid = parsed.aux_sid;
   const avatar = avatarFromAuth(socket.handshake.auth);
   const forceGuest = Boolean(socket.handshake.auth.forceGuest);
-  if (sid && !forceGuest) {
-    const user = await findUserBySession(sid);
+  if (!forceGuest) {
+    const sid = parsed.aux_sid;
+    const fromCookie = sid ? await findUserBySession(sid) : undefined;
+    const fromToken = fromCookie ? undefined : await findUserByPlayToken(socket.handshake.auth.playToken);
+    const user = fromCookie || fromToken;
     if (user?.email_verified) {
       return {
         id: user.id,

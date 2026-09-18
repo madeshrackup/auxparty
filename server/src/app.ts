@@ -17,7 +17,7 @@ import {
   sessionFromRequest,
   setSessionCookie,
   startPasswordChange,
-  userPublic,
+  authBody,
   verifyEmailToken,
 } from "./auth.ts";
 import { APP_URL } from "./env.ts";
@@ -53,7 +53,7 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/auth/me", async (req, res) => {
   try {
     const user = await getAuthedUser(req);
-    res.json({ user: user ? userPublic(user) : null });
+    res.json(authBody(user));
   } catch {
     res.json({ user: null });
   }
@@ -78,7 +78,7 @@ app.post("/api/auth/login", async (req, res) => {
     const { username, password } = req.body as { username?: string; password?: string };
     const { user, sid } = await loginUser(username || "", password || "");
     setSessionCookie(res, sid);
-    res.json({ user: userPublic(user) });
+    res.json(authBody(user));
   } catch (err) {
     authFail(res, err, "Login failed.");
   }
@@ -138,7 +138,7 @@ app.post("/api/auth/profile", async (req, res) => {
     const user = await requireUser(req);
     const aboutMe = String((req.body as { aboutMe?: string })?.aboutMe ?? "");
     const next = await saveProfile(user.id, aboutMe);
-    res.json({ user: userPublic(next) });
+    res.json(authBody(next));
   } catch (err) {
     authFail(res, err, "Could not save that profile.");
   }
@@ -149,7 +149,7 @@ app.post("/api/auth/avatar", async (req, res) => {
     const user = await requireUser(req);
     const { image, mime } = req.body as { image?: string; mime?: string };
     const next = await saveAvatar(user.id, image || "", mime || "image/jpeg");
-    res.json({ user: userPublic(next) });
+    res.json(authBody(next));
   } catch (err) {
     authFail(res, err, "Could not save that photo.");
   }
