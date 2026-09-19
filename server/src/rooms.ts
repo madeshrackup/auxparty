@@ -14,7 +14,11 @@ import type {
   RoomState,
   Track,
 } from "../../shared/types.ts";
-import { MIN_PLAYERS } from "../../shared/types.ts";
+import {
+  MAX_ROUNDS,
+  MIN_PLAYERS,
+  MIN_ROUNDS,
+} from "../../shared/types.ts";
 import { fetchChart, resolvePlaylist, uniqueTracks } from "./itunes.ts";
 import { matchesSong } from "./match.ts";
 import { isBuzzerChart } from "./seeds.ts";
@@ -277,8 +281,12 @@ export class Room {
   setRounds(playerId: string, total: number) {
     this.requireHost(playerId);
     this.requireLobby();
-    if (![3, 5, 8].includes(total)) throw new Error("Pick 3, 5, or 8 rounds.");
-    this.totalRounds = total;
+    if (!Number.isFinite(total)) throw new Error("Pick how many rounds to play.");
+    const next = Math.round(total);
+    if (next < MIN_ROUNDS || next > MAX_ROUNDS) {
+      throw new Error(`Rounds must be between ${MIN_ROUNDS} and ${MAX_ROUNDS}.`);
+    }
+    this.totalRounds = next;
     this.emit();
   }
 

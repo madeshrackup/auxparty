@@ -1207,6 +1207,41 @@ a.text-link {
   color: var(--lime);
 }
 
+.rounds-field {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.rounds-picker {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.rounds-input {
+  width: 72px;
+  text-align: center;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.rounds-step {
+  width: 42px;
+  border: 3px solid #fff;
+  border-radius: 14px;
+  background: #7a1ea8;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 4px 0 var(--stroke);
+}
+
+.rounds-step:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 input {
   background: #fff;
   color: #5a117c;

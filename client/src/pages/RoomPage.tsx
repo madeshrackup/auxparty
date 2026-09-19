@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { MIN_PLAYERS, BUZZER_CHARTS, type GameMode, type RoomPopup, type RoomState, type SocketAck, type Track } from "@shared/types";
+import { MIN_PLAYERS, MAX_ROUNDS, MIN_ROUNDS, BUZZER_CHARTS, type GameMode, type RoomPopup, type RoomState, type SocketAck, type Track } from "@shared/types";
 import Artwork from "../components/Artwork";
 import Dropdown from "../components/Dropdown";
 import Scoreboard from "../components/Scoreboard";
@@ -292,6 +292,76 @@ function PenaltyPopup({ popup }: { popup: RoomPopup | null }) {
   return <div className="toast penalty-toast">{popup.message}</div>;
 }
 
+function RoundsField({
+  value,
+  onCommit,
+}: {
+  value: number;
+  onCommit: (total: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  function clamp(n: number) {
+    return Math.min(MAX_ROUNDS, Math.max(MIN_ROUNDS, Math.round(n)));
+  }
+
+  function commit(raw: string) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) {
+      setDraft(String(value));
+      return;
+    }
+    const next = clamp(n);
+    setDraft(String(next));
+    if (next !== value) onCommit(next);
+  }
+
+  return (
+    <div className="field rounds-field">
+      <label>Rounds</label>
+      <div className="rounds-picker">
+        <button
+          className="rounds-step"
+          type="button"
+          aria-label="Fewer rounds"
+          disabled={value <= MIN_ROUNDS}
+          onClick={() => onCommit(clamp(value - 1))}
+        >
+          −
+        </button>
+        <input
+          className="nick-input rounds-input"
+          inputMode="numeric"
+          min={MIN_ROUNDS}
+          max={MAX_ROUNDS}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value.replace(/[^\d]/g, ""))}
+          onBlur={() => commit(draft)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commit(draft);
+            }
+          }}
+        />
+        <button
+          className="rounds-step"
+          type="button"
+          aria-label="More rounds"
+          disabled={value >= MAX_ROUNDS}
+          onClick={() => onCommit(clamp(value + 1))}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Lobby({
   state,
   youHost,
@@ -333,20 +403,12 @@ function Lobby({
             </span>
           </span>
         </label>
-        {youHost && (
+        {youHost ? (
           <div className="row" style={{ marginTop: 16 }}>
-            <div className="field" style={{ flex: "0 0 140px" }}>
-              <label>Rounds</label>
-              <Dropdown
-                value={state.totalRounds}
-                options={[
-                  { value: 3, label: "3" },
-                  { value: 5, label: "5" },
-                  { value: 8, label: "8" },
-                ]}
-                onChange={(total) => onSend("room:set-rounds", { total })}
-              />
-            </div>
+            <RoundsField
+              value={state.totalRounds}
+              onCommit={(total) => onSend("room:set-rounds", { total })}
+            />
             <button
               className="btn btn-primary"
               type="button"
@@ -356,6 +418,10 @@ function Lobby({
               Start {MODE_COPY[state.mode].title}
             </button>
           </div>
+        ) : (
+          <p className="hint" style={{ marginTop: 16 }}>
+            This party is set to {state.totalRounds} {state.totalRounds === 1 ? "round" : "rounds"}.
+          </p>
         )}
         {youHost && !canStart && (
           <p className="hint" style={{ marginTop: 10 }}>

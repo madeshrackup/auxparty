@@ -7,6 +7,9 @@ export const MIN_PLAYERS: Record<GameMode, number> = {
   aux: 3,
 };
 
+export const MIN_ROUNDS = 1;
+export const MAX_ROUNDS = 30;
+
 export type RoomPhase =
   | "lobby"
   | "classic_submit"
