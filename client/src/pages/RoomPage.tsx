@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { MIN_PLAYERS, type GameMode, type RoomPopup, type RoomState, type SocketAck, type Track } from "@shared/types";
+import { MIN_PLAYERS, BUZZER_CHARTS, type GameMode, type RoomPopup, type RoomState, type SocketAck, type Track } from "@shared/types";
 import Artwork from "../components/Artwork";
 import Dropdown from "../components/Dropdown";
 import Scoreboard from "../components/Scoreboard";
@@ -10,6 +10,7 @@ import { playPreview, stopPreview, unlockAudio } from "../audio";
 import { emitAck, getSocket } from "../socket";
 import { useAuth } from "../useAuth";
 import UserMenu from "../components/UserMenu";
+import FriendsPanel from "../components/FriendsPanel";
 import { getAvatar } from "../identity";
 import { runViewTransition } from "../transition";
 
@@ -19,6 +20,7 @@ function sceneOf(phase: RoomState["phase"]) {
   if (phase.startsWith("classic")) return "classic_play";
   if (phase.startsWith("buzzer")) return "buzzer";
   if (phase === "impostor_submit") return phase;
+  if (phase === "impostor_recap") return phase;
   if (phase.startsWith("impostor")) return "impostor_play";
   if (phase.startsWith("aux")) return phase;
   return phase;
@@ -31,11 +33,11 @@ const MODE_COPY: Record<GameMode, { title: string; body: string }> = {
   },
   buzzer: {
     title: "Buzzer Beater",
-    body: "Buzz in, then type the title before anyone else locks it.",
+    body: "Buzz in, then type the title before anyone else locks it. A miss only burns you for that clip.",
   },
   impostor: {
     title: "Who Added This?",
-    body: "Everyone sneaks in a track. Guess the song and the culprit.",
+    body: "Everyone sneaks in a track. Guess who put it on — not the title. Correct answers score 20 plus however many seconds are left.",
   },
   aux: {
     title: "Pass the Aux",
@@ -119,37 +121,40 @@ export default function RoomPage() {
       return {
         url: state.classic.track.previewUrl,
         startedAt: state.classic.playStartedAt,
+        serverNow: state.serverNow,
       };
     }
     if (state.buzzer?.track && (state.phase === "buzzer_playing" || state.phase === "buzzer_buzzed")) {
       return {
         url: state.buzzer.track.previewUrl,
         startedAt: state.buzzer.playStartedAt,
+        serverNow: state.serverNow,
       };
     }
     if (state.impostor?.track && state.phase === "impostor_playing") {
       return {
         url: state.impostor.track.previewUrl,
         startedAt: state.impostor.playStartedAt,
+        serverNow: state.serverNow,
       };
     }
     if (state.phase === "aux_listen" && state.aux?.entries) {
       const entry = state.aux.entries[state.aux.listenIndex];
       if (entry) {
-        return { url: entry.track.previewUrl, startedAt: state.aux.listenStartedAt };
+        return { url: entry.track.previewUrl, startedAt: state.aux.listenStartedAt, serverNow: state.serverNow };
       }
     }
     return null;
   }, [state]);
 
   useEffect(() => {
-    if (!preview?.url || !preview.startedAt || !state) {
+    if (!preview?.url || !preview.startedAt) {
       stopPreview();
       return;
     }
-    playPreview(preview.url, preview.startedAt, state.serverNow);
+    playPreview(preview.url, preview.startedAt, preview.serverNow);
     return () => stopPreview();
-  }, [preview?.url, preview?.startedAt, state?.serverNow]);
+  }, [preview?.url, preview?.startedAt]);
 
   useEffect(() => {
     if (!quitOpen) return;
@@ -160,10 +165,10 @@ export default function RoomPage() {
     return () => document.removeEventListener("keydown", onKey);
   }, [quitOpen]);
 
-  async function send(event: string, payload?: unknown) {
+  async function send(event: string, payload?: unknown, timeoutMs = 15000) {
     try {
       const sock = getSocket(name, asGuest, photo, playToken);
-      const res = await emitAck<SocketAck>(sock, event, payload);
+      const res = await emitAck<SocketAck>(sock, event, payload, timeoutMs);
       if (!res.ok) setToast(res.error || "That didn't work.");
     } catch (err) {
       setToast(err instanceof Error ? err.message : "Network error.");
@@ -280,24 +285,11 @@ function PenaltyPopup({ popup }: { popup: RoomPopup | null }) {
       return;
     }
     setOpen(true);
-    const timer = setTimeout(() => setOpen(false), 4200);
+    const timer = setTimeout(() => setOpen(false), 2800);
     return () => clearTimeout(timer);
   }, [popup?.id]);
   if (!open || !popup) return null;
-  return (
-    <div className="modal-back penalty-back" onClick={() => setOpen(false)}>
-      <div
-        className="panel penalty-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={popup.message}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="kicker">Missed pick</div>
-        <h2>{popup.message}</h2>
-      </div>
-    </div>
-  );
+  return <div className="toast penalty-toast">{popup.message}</div>;
 }
 
 function Lobby({
@@ -307,13 +299,14 @@ function Lobby({
 }: {
   state: RoomState;
   youHost: boolean;
-  onSend: (event: string, payload?: unknown) => void;
+  onSend: (event: string, payload?: unknown, timeoutMs?: number) => void;
 }) {
   const connected = state.players.filter((p) => p.connected).length;
   const minPlayers = MIN_PLAYERS[state.mode];
   const canStart = connected >= minPlayers;
+  const [playlistUrl, setPlaylistUrl] = useState("");
   return (
-    <div className="grid-2">
+    <div className="grid-2 lobby-grid">
       <div className="panel">
         <div className="kicker">Share this code</div>
         <div className="room-code">{state.code}</div>
@@ -324,6 +317,22 @@ function Lobby({
           <p>{MODE_COPY[state.mode].body}</p>
           <p className="hint">{minPlayers} players minimum</p>
         </div>
+        <label className={`privacy-check ${youHost ? "" : "locked"}`}>
+          <input
+            type="checkbox"
+            checked={state.isPrivate}
+            disabled={!youHost}
+            onChange={(event) => onSend("room:set-private", { isPrivate: event.target.checked })}
+          />
+          <span>
+            Private lobby
+            <span className="hint">
+              {state.isPrivate
+                ? "Friends need this code or an invite to join."
+                : "Friends can join this party from your friends list."}
+            </span>
+          </span>
+        </label>
         {youHost && (
           <div className="row" style={{ marginTop: 16 }}>
             <div className="field" style={{ flex: "0 0 140px" }}>
@@ -356,29 +365,70 @@ function Lobby({
         )}
         {state.mode === "buzzer" && (
           <div style={{ marginTop: 24 }}>
-            <h2>Bring tracks</h2>
+            <h2>The mix</h2>
             <p className="hint">
-              Optional queue. If it's empty, we'll pull a mixed seed catalogue from iTunes.
+              Default is today's biggest hits. Pick another chart, or paste public Spotify / Apple Music playlist links.
             </p>
-            <TrackSearch onPick={(track) => onSend("room:queue", { track })} />
+            <div className="field" style={{ marginTop: 12 }}>
+              <label>Chart</label>
+              <Dropdown
+                value={state.buzzerChart}
+                options={BUZZER_CHARTS.map((chart) => ({ value: chart.id, label: chart.label }))}
+                onChange={(chart) => youHost && onSend("room:set-chart", { chart })}
+                disabled={!youHost}
+              />
+            </div>
+            {youHost && (
+              <form
+                className="row"
+                style={{ marginTop: 12 }}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const url = playlistUrl.trim();
+                  if (!url) return;
+                  onSend("room:add-playlist", { url }, 60000);
+                  setPlaylistUrl("");
+                }}
+              >
+                <div className="field" style={{ flex: 1 }}>
+                  <label>Playlist link</label>
+                  <input
+                    value={playlistUrl}
+                    placeholder="Spotify or Apple Music playlist URL"
+                    onChange={(e) => setPlaylistUrl(e.target.value)}
+                  />
+                </div>
+                <button className="btn btn-gold" type="submit">
+                  Add
+                </button>
+              </form>
+            )}
             <div className="queue" style={{ marginTop: 12 }}>
-              {state.queue.map((q) => (
-                <div key={q.trackId} className="player">
+              {state.buzzerPlaylists.map((playlist) => (
+                <div key={playlist.url} className="player">
                   <span>
-                    {q.title} — {q.artist}
+                    {playlist.label}
+                    <span className="hint"> · {playlist.trackCount} tracks</span>
                   </span>
+                  {youHost && (
+                    <button
+                      className="btn btn-ghost"
+                      type="button"
+                      onClick={() => onSend("room:remove-playlist", { url: playlist.url })}
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
-            {youHost && state.queue.length > 0 && (
-              <button className="btn btn-ghost" type="button" onClick={() => onSend("room:clear-queue")}>
-                Clear mix
-              </button>
-            )}
           </div>
         )}
       </div>
-      <Scoreboard players={state.players} youId={state.youId} />
+      <div className="lobby-side">
+        <Scoreboard players={state.players} youId={state.youId} />
+        <FriendsPanel compact canInvite />
+      </div>
     </div>
   );
 }
@@ -408,7 +458,7 @@ function ClassicView({
           </div>
           <h2>You have 30 seconds to pick a song</h2>
           <p className="hint">
-            Everyone queues one track. Miss the window and it's -15pts.
+            Everyone picks one track. Miss the window and it's -15pts.
           </p>
           <TimerBar
             endsAt={state.timerEndsAt}
@@ -580,7 +630,7 @@ function BuzzerView({
             >
               BUZZ
             </button>
-            {eliminated && <p className="hint">You're out for this clip.</p>}
+            {eliminated && <p className="hint">You're out for this clip only. Next song you're back in.</p>}
           </>
         )}
       </div>
@@ -596,23 +646,21 @@ function ImpostorView({
   state: RoomState;
   onSend: (event: string, payload?: unknown) => void;
 }) {
-  const [title, setTitle] = useState(state.impostor?.yourGuess?.title || "");
-  const [submitterId, setSubmitterId] = useState(state.impostor?.yourGuess?.submitterId || "");
   const impostor = state.impostor;
-
   const isYourTrack = Boolean(impostor?.isYours);
-
   const youHost = state.youId === state.hostId;
+  const names = state.players.filter((p) => p.connected || p.id === state.youId);
 
   if (state.phase === "impostor_submit") {
     return (
       <div className="game-layout">
         <div className="panel">
-          <div className="kicker">Who Added This?</div>
+          <div className="kicker">
+            Who Added This? · Round {state.round}/{state.totalRounds}
+          </div>
           <h2>Sneak a track into the pile</h2>
           <p className="hint">
-            Guilty pleasure, middle-school throwback, or a hype cut. Don't tell anyone.
-            30 seconds — miss it and it's -15pts.
+            Any song. Everyone picks one, then the room guesses who added each clip — not the title.
           </p>
           <TimerBar
             endsAt={state.timerEndsAt}
@@ -635,40 +683,77 @@ function ImpostorView({
     );
   }
 
+  if (state.phase === "impostor_recap") {
+    return (
+      <div className="game-layout">
+        <div className="panel">
+          <div className="kicker">
+            Who Added This? · Round {state.round}/{state.totalRounds}
+          </div>
+          <h2>That round's pile</h2>
+          <p className="hint">Now you can see who brought what. Next round, everyone sneaks in a new song.</p>
+          <TimerBar
+            endsAt={state.timerEndsAt}
+            duration={state.timerDurationMs || 12000}
+            serverNow={state.serverNow}
+          />
+          <div className="queue" style={{ width: "100%", textAlign: "left" }}>
+            {impostor?.recap?.map((entry) => (
+              <div key={entry.track.trackId} className="player">
+                <span>
+                  {entry.track.title} — {entry.track.artist}
+                </span>
+                <strong>{entry.submitterName}</strong>
+              </div>
+            ))}
+          </div>
+          {youHost && (
+            <button className="btn btn-primary" type="button" onClick={() => onSend("game:advance")}>
+              Continue
+            </button>
+          )}
+        </div>
+        <Scoreboard players={state.players} youId={state.youId} deltas={state.lastDeltas} />
+      </div>
+    );
+  }
+
+  const reveal = state.phase === "impostor_reveal";
+
   return (
     <div className="game-layout">
       <div className="panel stage">
         <div className="kicker">
-          Who Added This? · {state.round}/{state.totalRounds}
+          Who Added This? · Round {state.round}/{state.totalRounds}
+          {impostor && impostor.clipTotal > 0
+            ? ` · song ${(impostor.clipIndex || 0) + 1}/${impostor.clipTotal}`
+            : ""}
         </div>
         <Artwork
-          src={impostor?.track?.artworkUrl || impostor?.reveal?.track.artworkUrl}
+          src={impostor?.track?.artworkUrl}
           spinning={state.phase === "impostor_playing"}
-          blurred={state.phase !== "impostor_reveal"}
+          blurred={!reveal}
         />
         <TimerBar
           endsAt={state.timerEndsAt}
           duration={state.timerDurationMs || 30000}
           serverNow={state.serverNow}
         />
-        {state.phase === "impostor_reveal" && impostor?.reveal ? (
+        {reveal ? (
           <>
             <h2>
-              {impostor.reveal.track.title}
-              <div className="hint">
-                {impostor.reveal.track.artist} · added by {impostor.reveal.submitterName}
-              </div>
+              {impostor?.track?.title}
+              <div className="hint">{impostor?.track?.artist}</div>
             </h2>
-            <div className="queue" style={{ width: "100%", textAlign: "left" }}>
-              {impostor.reveal.guesses.map((g) => (
-                <div key={g.playerId} className="player">
-                  <span>{g.playerName}</span>
-                  <span>
-                    {g.songOk ? "song ✓" : "song ✗"} · {g.whoOk ? "who ✓" : "who ✗"}
-                  </span>
-                </div>
-              ))}
-            </div>
+            {impostor?.yourPoints != null ? (
+              <p className={`delta ${impostor.yourPoints > 0 ? "" : "down"}`}>
+                {impostor.yourPoints > 0 ? `Nice — +${impostor.yourPoints}` : "Wrong person · 0 points this clip"}
+              </p>
+            ) : isYourTrack ? (
+              <p>That was yours. The room is scoring guesses.</p>
+            ) : (
+              <p className="hint">No guess this clip.</p>
+            )}
             {youHost && (
               <button className="btn btn-primary" type="button" onClick={() => onSend("game:advance")}>
                 Next
@@ -676,36 +761,28 @@ function ImpostorView({
             )}
           </>
         ) : isYourTrack ? (
-          <p>You added this one. Look innocent.</p>
+          <p>You added this one. No guessing for you — look innocent.</p>
+        ) : impostor?.yourGuess ? (
+          <p>
+            Locked in {names.find((p) => p.id === impostor.yourGuess?.submitterId)?.name || "someone"}.
+            Waiting on {Math.max(0, (impostor.guesserTotal || 0) - (impostor.guessedCount || 0))} more.
+          </p>
         ) : (
-          <form
-            style={{ width: "100%", textAlign: "left" }}
-            onSubmit={(e) => {
-              e.preventDefault();
-              onSend("game:guess-impostor", { title, submitterId });
-            }}
-          >
-            <div className="row">
-              <div className="field">
-                <label>Title</label>
-                <input value={title} onChange={(e) => setTitle(e.target.value)} />
-              </div>
-            </div>
-            <div className="field" style={{ marginTop: 10 }}>
-              <label>Who added this?</label>
-              <Dropdown
-                value={submitterId}
-                placeholder="Pick a friend"
-                options={state.players
-                  .filter((p) => p.id !== state.youId)
-                  .map((p) => ({ value: p.id, label: p.name }))}
-                onChange={setSubmitterId}
-              />
-            </div>
-            <button className="btn btn-gold" type="submit" style={{ marginTop: 12 }}>
-              {impostor?.yourGuess ? "Update guess" : "Submit guess"}
-            </button>
-          </form>
+          <div className="name-grid">
+            <p className="hint">Who put this on?</p>
+            {names
+              .filter((p) => p.id !== state.youId)
+              .map((player) => (
+                <button
+                  key={player.id}
+                  type="button"
+                  className="btn btn-gold name-guess"
+                  onClick={() => onSend("game:guess-impostor", { submitterId: player.id })}
+                >
+                  {player.name}
+                </button>
+              ))}
+          </div>
         )}
       </div>
       <Scoreboard players={state.players} youId={state.youId} deltas={state.lastDeltas} />

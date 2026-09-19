@@ -2,13 +2,15 @@ const audio = new Audio();
 audio.preload = "auto";
 
 let currentUrl = "";
+let currentStartedAt = 0;
 
-export function playPreview(url: string, playStartedAt: number, _serverNow: number) {
-  const startAt = Math.min(Math.max(0, (Date.now() - playStartedAt) / 1000), 28);
+export function playPreview(url: string, playStartedAt: number, serverNow: number) {
+  const elapsed = Math.min(Math.max(0, (serverNow - playStartedAt) / 1000), 28);
+  const sameClip = currentUrl === url && currentStartedAt === playStartedAt;
   const seekAndPlay = () => {
     try {
-      if (Math.abs(audio.currentTime - startAt) > 0.35) {
-        audio.currentTime = startAt;
+      if (!sameClip || Math.abs(audio.currentTime - elapsed) > 1.25) {
+        audio.currentTime = elapsed;
       }
       void audio.play();
     } catch {
@@ -17,11 +19,13 @@ export function playPreview(url: string, playStartedAt: number, _serverNow: numb
   };
   if (currentUrl !== url) {
     currentUrl = url;
+    currentStartedAt = playStartedAt;
     audio.src = url;
     audio.addEventListener("canplay", seekAndPlay, { once: true });
     audio.load();
     return;
   }
+  currentStartedAt = playStartedAt;
   seekAndPlay();
 }
 
@@ -29,6 +33,7 @@ export function stopPreview() {
   audio.pause();
   audio.removeAttribute("src");
   currentUrl = "";
+  currentStartedAt = 0;
 }
 
 export function unlockAudio() {

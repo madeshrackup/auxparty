@@ -7,7 +7,23 @@ import { findUserBySession } from "./db.ts";
 import { APP_URL, SUPABASE_URL } from "./env.ts";
 import { publicAvatarUrl, userIdFromPlayToken } from "./auth.ts";
 import { RoomManager } from "./rooms.ts";
-import type { GameMode, ImpostorGuess, LobbyPreview, Track } from "../../shared/types.ts";
+import { isBuzzerChart } from "./seeds.ts";
+import {
+  acceptFriend,
+  addInvite,
+  buildSocialState,
+  clearInvite,
+  declineFriend,
+  friendIdsOf,
+  loadFriendMessages,
+  presenceFromRoom,
+  requestFriend,
+  requireFriends,
+  sendFriendMessage,
+  unfriend,
+  type Presence,
+} from "./social.ts";
+import type { BuzzerChartId, GameMode, ImpostorGuess, LobbyPreview, Track } from "../../shared/types.ts";
 
 const PORT = Number(process.env.PORT) || 3001;
 const ORIGIN = process.env.CORS_ORIGIN || APP_URL || "http://localhost:5173";
@@ -126,6 +142,36 @@ function attachRoom(room: { code: string }) {
   r.onChange = () => broadcast(r.code);
 }
 
+function presenceFor(viewerId: string, friendId: string): Presence {
+  const room = rooms.findByPlayer(friendId);
+  const fromRoom = presenceFromRoom(room, viewerId);
+  return {
+    ...fromRoom,
+    online: socketsByPlayer.has(friendId) || Boolean(room),
+  };
+}
+
+async function emitSocial(userId: string) {
+  const sid = socketsByPlayer.get(userId);
+  if (!sid) return;
+  try {
+    const state = await buildSocialState(userId, (friendId) => presenceFor(userId, friendId));
+    io.to(sid).emit("social:state", state);
+  } catch {
+    /* friends tables may not exist yet */
+  }
+}
+
+async function pushSocialToFriends(userId: string) {
+  await emitSocial(userId);
+  try {
+    const ids = await friendIdsOf(userId);
+    await Promise.all(ids.map((id) => emitSocial(id)));
+  } catch {
+    /* ignore */
+  }
+}
+
 io.use(async (socket, next) => {
   try {
     socket.data.identity = await withTimeout(identityFromHandshake(socket), 3000);
@@ -163,7 +209,7 @@ io.on("connection", (socket) => {
 
   socket.on(
     "room:create",
-    async (payload: { name?: string; avatar?: string; mode?: GameMode }, ack?: (a: { ok: boolean; error?: string; code?: string }) => void) => {
+    async (payload: { name?: string; avatar?: string; mode?: GameMode; isPrivate?: boolean }, ack?: (a: { ok: boolean; error?: string; code?: string }) => void) => {
       try {
         if (payload?.name) {
           identity = { ...identity, name: payload.name.trim().slice(0, 20) || identity.name };
@@ -171,11 +217,13 @@ io.on("connection", (socket) => {
         if (payload?.avatar) identity = { ...identity, avatar: payload.avatar.slice(0, 16) };
         socketsByPlayer.set(identity.id, socket.id);
         const mode = isGameMode(payload?.mode) ? payload.mode : undefined;
-        const room = rooms.create(identity, mode);
+        const isPrivate = payload?.isPrivate !== false;
+        const room = rooms.create(identity, mode, isPrivate);
         attachRoom(room);
         socket.data.roomCode = room.code;
         socket.join(room.code);
         broadcast(room.code);
+        void pushSocialToFriends(identity.id);
         ack?.({ ok: true, code: room.code });
       } catch (err) {
         ackError(ack, err);
@@ -203,6 +251,8 @@ io.on("connection", (socket) => {
         socket.data.roomCode = room.code;
         socket.join(room.code);
         broadcast(room.code);
+        clearInvite(identity.id, room.code);
+        void pushSocialToFriends(identity.id);
         ack?.({ ok: true, code: room.code });
       } catch (err) {
         ackError(ack, err);
@@ -217,6 +267,7 @@ io.on("connection", (socket) => {
     socket.leave(code);
     socket.data.roomCode = "";
     broadcast(code);
+    void pushSocialToFriends(identity.id);
   });
 
   socket.on("room:set-mode", (payload: { mode?: GameMode }, ack?: (a: { ok: boolean; error?: string }) => void) => {
@@ -242,23 +293,46 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("room:queue", (payload: { track?: Track }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+  socket.on("room:set-private", (payload: { isPrivate?: boolean }, ack?: (a: { ok: boolean; error?: string }) => void) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new Error("You're not in a room.");
-      if (!payload?.track) throw new Error("Pick a track.");
-      room.queueTrack(identity.id, payload.track);
+      room.setPrivate(identity.id, Boolean(payload?.isPrivate));
+      void pushSocialToFriends(identity.id);
       ack?.({ ok: true });
     } catch (err) {
       ackError(ack, err);
     }
   });
 
-  socket.on("room:clear-queue", (_p, ack?: (a: { ok: boolean; error?: string }) => void) => {
+  socket.on("room:set-chart", (payload: { chart?: BuzzerChartId }, ack?: (a: { ok: boolean; error?: string }) => void) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new Error("You're not in a room.");
-      room.clearQueue(identity.id);
+      if (!isBuzzerChart(payload?.chart)) throw new Error("Pick a chart.");
+      room.setBuzzerChart(identity.id, payload.chart);
+      ack?.({ ok: true });
+    } catch (err) {
+      ackError(ack, err);
+    }
+  });
+
+  socket.on("room:add-playlist", async (payload: { url?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room) throw new Error("You're not in a room.");
+      await room.addBuzzerPlaylist(identity.id, String(payload?.url || ""));
+      ack?.({ ok: true });
+    } catch (err) {
+      ackError(ack, err);
+    }
+  });
+
+  socket.on("room:remove-playlist", (payload: { url?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room) throw new Error("You're not in a room.");
+      room.removeBuzzerPlaylist(identity.id, String(payload?.url || ""));
       ack?.({ ok: true });
     } catch (err) {
       ackError(ack, err);
@@ -270,6 +344,7 @@ io.on("connection", (socket) => {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new Error("You're not in a room.");
       await room.start(identity.id);
+      void pushSocialToFriends(identity.id);
       ack?.({ ok: true });
     } catch (err) {
       ackError(ack, err);
@@ -370,11 +445,153 @@ io.on("connection", (socket) => {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new Error("You're not in a room.");
       room.backToLobby(identity.id);
+      void pushSocialToFriends(identity.id);
       ack?.({ ok: true });
     } catch (err) {
       ackError(ack, err);
     }
   });
+
+  const requireAccount = () => {
+    if (identity.isGuest) throw new Error("Log in to use friends.");
+    return identity.id;
+  };
+
+  socket.on("social:sync", async (_p, ack?: (a: { ok: boolean; error?: string }) => void) => {
+    try {
+      const userId = requireAccount();
+      await emitSocial(userId);
+      ack?.({ ok: true });
+    } catch (err) {
+      ackError(ack, err);
+    }
+  });
+
+  socket.on("social:add", async (payload: { username?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+    try {
+      const userId = requireAccount();
+      const friend = await requestFriend(userId, String(payload?.username || ""));
+      await emitSocial(userId);
+      await emitSocial(friend.id);
+      ack?.({ ok: true });
+    } catch (err) {
+      ackError(ack, err);
+    }
+  });
+
+  socket.on("social:accept", async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+    try {
+      const userId = requireAccount();
+      await acceptFriend(userId, String(payload?.userId || ""));
+      await emitSocial(userId);
+      await emitSocial(String(payload?.userId || ""));
+      ack?.({ ok: true });
+    } catch (err) {
+      ackError(ack, err);
+    }
+  });
+
+  socket.on("social:decline", async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+    try {
+      const userId = requireAccount();
+      await declineFriend(userId, String(payload?.userId || ""));
+      await emitSocial(userId);
+      await emitSocial(String(payload?.userId || ""));
+      ack?.({ ok: true });
+    } catch (err) {
+      ackError(ack, err);
+    }
+  });
+
+  socket.on("social:remove", async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+    try {
+      const userId = requireAccount();
+      const other = String(payload?.userId || "");
+      await unfriend(userId, other);
+      await emitSocial(userId);
+      await emitSocial(other);
+      ack?.({ ok: true });
+    } catch (err) {
+      ackError(ack, err);
+    }
+  });
+
+  socket.on(
+    "social:message",
+    async (payload: { userId?: string; body?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+      try {
+        const userId = requireAccount();
+        const toId = String(payload?.userId || "");
+        const message = await sendFriendMessage(userId, toId, String(payload?.body || ""));
+        const sid = socketsByPlayer.get(toId);
+        if (sid) io.to(sid).emit("social:message", message);
+        socket.emit("social:message", message);
+        ack?.({ ok: true });
+      } catch (err) {
+        ackError(ack, err);
+      }
+    },
+  );
+
+  socket.on(
+    "social:history",
+    async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string; messages?: unknown }) => void) => {
+      try {
+        const userId = requireAccount();
+        const messages = await loadFriendMessages(userId, String(payload?.userId || ""));
+        ack?.({ ok: true, messages });
+      } catch (err) {
+        ackError(ack, err);
+      }
+    },
+  );
+
+  socket.on("social:invite", async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+    try {
+      const userId = requireAccount();
+      const toId = String(payload?.userId || "");
+      await requireFriends(userId, toId);
+      const room = rooms.get(socket.data.roomCode);
+      if (!room) throw new Error("Start or join a room first.");
+      room.invitePlayer(userId, toId);
+      addInvite(toId, {
+        fromId: userId,
+        fromName: identity.name,
+        code: room.code,
+        mode: room.mode,
+      });
+      await emitSocial(toId);
+      ack?.({ ok: true });
+    } catch (err) {
+      ackError(ack, err);
+    }
+  });
+
+  socket.on(
+    "social:join-friend",
+    async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string; code?: string }) => void) => {
+      try {
+        const userId = requireAccount();
+        const friendId = String(payload?.userId || "");
+        await requireFriends(userId, friendId);
+        const room = rooms.findByPlayer(friendId);
+        if (!room) throw new Error("They're not in a party right now.");
+        if (!room.canJoinWithoutCode(userId)) {
+          throw new Error("That lobby is private. Ask them for the code or an invite.");
+        }
+        room.join(identity);
+        attachRoom(room);
+        socket.data.roomCode = room.code;
+        socket.join(room.code);
+        broadcast(room.code);
+        clearInvite(userId, room.code);
+        void pushSocialToFriends(userId);
+        ack?.({ ok: true, code: room.code });
+      } catch (err) {
+        ackError(ack, err);
+      }
+    },
+  );
 
   socket.on("disconnect", () => {
     const code = socket.data.roomCode as string;
@@ -385,6 +602,7 @@ io.on("connection", (socket) => {
       rooms.get(code)?.leave(identity.id);
       broadcast(code);
     }
+    void pushSocialToFriends(identity.id);
   });
 });
 

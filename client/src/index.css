@@ -1763,6 +1763,7 @@ a.btn {
   .play-grid,
   .grid-2,
   .game-layout,
+  .lobby-grid,
   .modes,
   .mode-choice-grid {
     grid-template-columns: 1fr;
@@ -1948,6 +1949,188 @@ a.btn {
   resize: vertical;
   min-height: 110px;
   font-family: Fredoka, sans-serif;
+}
+
+.account-back {
+  text-align: center;
+  margin-top: 12px;
+}
+
+.privacy-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-radius: 16px;
+  background: rgba(90, 17, 124, 0.28);
+  cursor: pointer;
+}
+
+.privacy-check.locked {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.privacy-check input {
+  margin-top: 4px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--lime);
+}
+
+.privacy-check .hint {
+  display: block;
+  margin-top: 4px;
+}
+
+.lobby-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.name-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  width: 100%;
+}
+
+.name-guess {
+  min-width: 120px;
+}
+
+.play-friends {
+  grid-column: 1 / -1;
+}
+
+.friends-card {
+  width: min(720px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.friends-card.compact {
+  width: 100%;
+}
+
+.friend-add {
+  display: flex;
+  gap: 8px;
+}
+
+.friend-add .nick-input {
+  flex: 1;
+}
+
+.friend-list,
+.friend-invites {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.friend-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(90, 17, 124, 0.35);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.friend-row.on {
+  outline: 2px solid var(--lime);
+}
+
+.friend-who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.friend-who .hint {
+  display: block;
+  margin: 0;
+}
+
+.friend-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.friend-actions .btn {
+  padding: 6px 10px;
+  font-size: 14px;
+}
+
+.friend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8a7aa0;
+  flex-shrink: 0;
+}
+
+.friend-dot[data-on="true"] {
+  background: var(--lime);
+}
+
+.friend-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 2px solid rgba(255, 255, 255, 0.18);
+}
+
+.friend-chat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.friend-thread {
+  max-height: 180px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.friend-thread p {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(8, 0, 36, 0.35);
+  width: fit-content;
+  max-width: 90%;
+}
+
+.friend-thread p.mine {
+  margin-left: auto;
+  background: rgba(198, 255, 61, 0.18);
+}
+
+.penalty-toast {
+  background: #5a117c;
+  border-color: #ff5d7a;
+  color: #fff;
 }
 
 .field-label {

@@ -327,3 +327,179 @@ export async function uploadAvatarFile(userId: string, bytes: Buffer, contentTyp
   if (error) dbError(error, "Could not upload that photo.");
   return path;
 }
+
+export type FriendAccount = {
+  id: string;
+  username: string;
+  avatar_path: string | null;
+};
+
+function asFriendAccount(row: { id: string; username: string; avatar_path?: string | null }): FriendAccount {
+  return { id: row.id, username: row.username, avatar_path: row.avatar_path ?? null };
+}
+
+function socialError(error: { message?: string } | null, fallback: string) {
+  if (error?.message && /friendships|friend_requests|friend_messages/.test(error.message)) {
+    throw new Error("Friends aren't set up on this server yet. Run supabase/schema-friends.sql.");
+  }
+  dbError(error, fallback);
+}
+
+export async function listFriendIds(userId: string): Promise<string[]> {
+  const { data, error } = await sb().from("friendships").select("friend_id").eq("user_id", userId);
+  if (error) socialError(error, "Could not load friends.");
+  return ((data || []) as { friend_id: string }[]).map((row) => row.friend_id);
+}
+
+export async function listFriendAccounts(userId: string): Promise<FriendAccount[]> {
+  const ids = await listFriendIds(userId);
+  if (ids.length === 0) return [];
+  const { data, error } = await sb().from("accounts").select("id, username, avatar_path").in("id", ids);
+  if (error) socialError(error, "Could not load friends.");
+  return ((data || []) as { id: string; username: string; avatar_path: string | null }[]).map(asFriendAccount);
+}
+
+export async function listFriendRequests(userId: string): Promise<{
+  incoming: FriendAccount[];
+  outgoing: FriendAccount[];
+}> {
+  const { data: incoming, error: inErr } = await sb()
+    .from("friend_requests")
+    .select("from_id, accounts:from_id (id, username, avatar_path)")
+    .eq("to_id", userId);
+  if (inErr) socialError(inErr, "Could not load friend requests.");
+  const { data: outgoing, error: outErr } = await sb()
+    .from("friend_requests")
+    .select("to_id, accounts:to_id (id, username, avatar_path)")
+    .eq("from_id", userId);
+  if (outErr) socialError(outErr, "Could not load friend requests.");
+  const incomingAcc = ((incoming || []) as { accounts?: FriendAccount | FriendAccount[] | null }[])
+    .map((row) => (Array.isArray(row.accounts) ? row.accounts[0] : row.accounts))
+    .filter((row): row is FriendAccount => Boolean(row))
+    .map(asFriendAccount);
+  const outgoingAcc = ((outgoing || []) as { accounts?: FriendAccount | FriendAccount[] | null }[])
+    .map((row) => (Array.isArray(row.accounts) ? row.accounts[0] : row.accounts))
+    .filter((row): row is FriendAccount => Boolean(row))
+    .map(asFriendAccount);
+  return { incoming: incomingAcc, outgoing: outgoingAcc };
+}
+
+export async function areFriends(a: string, b: string): Promise<boolean> {
+  const { data, error } = await sb()
+    .from("friendships")
+    .select("friend_id")
+    .eq("user_id", a)
+    .eq("friend_id", b)
+    .maybeSingle();
+  if (error) socialError(error, "Could not check that friendship.");
+  return Boolean(data);
+}
+
+export async function createFriendRequest(fromId: string, username: string): Promise<FriendAccount> {
+  const target = await findUserByUsername(username);
+  if (!target) throw new Error("No account with that username.");
+  if (target.id === fromId) throw new Error("You can't add yourself.");
+  if (await areFriends(fromId, target.id)) throw new Error("You're already friends.");
+
+  const { data: reverse } = await sb()
+    .from("friend_requests")
+    .select("from_id")
+    .eq("from_id", target.id)
+    .eq("to_id", fromId)
+    .maybeSingle();
+  if (reverse) {
+    await acceptFriendRequest(fromId, target.id);
+    return { id: target.id, username: target.username, avatar_path: target.avatar_path };
+  }
+
+  const { error } = await sb().from("friend_requests").insert({
+    id: crypto.randomUUID(),
+    from_id: fromId,
+    to_id: target.id,
+  });
+  if (error) {
+    if (/duplicate|unique/i.test(error.message || "")) {
+      throw new Error("You already sent them a request.");
+    }
+    socialError(error, "Could not send that request.");
+  }
+  return { id: target.id, username: target.username, avatar_path: target.avatar_path };
+}
+
+export async function acceptFriendRequest(userId: string, fromId: string): Promise<void> {
+  const { data, error } = await sb()
+    .from("friend_requests")
+    .select("from_id")
+    .eq("from_id", fromId)
+    .eq("to_id", userId)
+    .maybeSingle();
+  if (error) socialError(error, "Could not accept that request.");
+  if (!data) throw new Error("No request from that player.");
+  const { error: insErr } = await sb().from("friendships").insert([
+    { user_id: userId, friend_id: fromId },
+    { user_id: fromId, friend_id: userId },
+  ]);
+  if (insErr && !/duplicate|unique/i.test(insErr.message || "")) {
+    socialError(insErr, "Could not add that friend.");
+  }
+  await sb().from("friend_requests").delete().eq("from_id", fromId).eq("to_id", userId);
+  await sb().from("friend_requests").delete().eq("from_id", userId).eq("to_id", fromId);
+}
+
+export async function declineFriendRequest(userId: string, otherId: string): Promise<void> {
+  const { error: a } = await sb().from("friend_requests").delete().eq("from_id", otherId).eq("to_id", userId);
+  const { error: b } = await sb().from("friend_requests").delete().eq("from_id", userId).eq("to_id", otherId);
+  if (a) socialError(a, "Could not decline that request.");
+  if (b) socialError(b, "Could not decline that request.");
+}
+
+export async function removeFriend(userId: string, friendId: string): Promise<void> {
+  const { error: a } = await sb().from("friendships").delete().eq("user_id", userId).eq("friend_id", friendId);
+  const { error: b } = await sb().from("friendships").delete().eq("user_id", friendId).eq("friend_id", userId);
+  if (a) socialError(a, "Could not remove that friend.");
+  if (b) socialError(b, "Could not remove that friend.");
+}
+
+export async function insertFriendMessage(fromId: string, toId: string, body: string): Promise<{
+  id: string;
+  createdAt: number;
+}> {
+  if (!(await areFriends(fromId, toId))) throw new Error("You can only message friends.");
+  const id = crypto.randomUUID();
+  const createdAt = Date.now();
+  const { error } = await sb().from("friend_messages").insert({
+    id,
+    from_id: fromId,
+    to_id: toId,
+    body,
+    created_at: new Date(createdAt).toISOString(),
+  });
+  if (error) socialError(error, "Could not send that message.");
+  return { id, createdAt };
+}
+
+export async function listFriendMessages(userId: string, otherId: string, limit = 50): Promise<{
+  id: string;
+  from_id: string;
+  to_id: string;
+  body: string;
+  created_at: string;
+}[]> {
+  if (!(await areFriends(userId, otherId))) throw new Error("You can only message friends.");
+  const { data, error } = await sb()
+    .from("friend_messages")
+    .select("id, from_id, to_id, body, created_at")
+    .or(
+      `and(from_id.eq.${userId},to_id.eq.${otherId}),and(from_id.eq.${otherId},to_id.eq.${userId})`,
+    )
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) socialError(error, "Could not load messages.");
+  return ([...(data || [])] as {
+    id: string;
+    from_id: string;
+    to_id: string;
+    body: string;
+    created_at: string;
+  }[]).reverse();
+}

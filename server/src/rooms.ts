@@ -1,6 +1,8 @@
 import type {
   AuxEntry,
   AuxView,
+  BuzzerChartId,
+  BuzzerPlaylist,
   BuzzerView,
   ClassicView,
   GameMode,
@@ -8,15 +10,14 @@ import type {
   ImpostorView,
   Player,
   PublicTrack,
-  QueuedTrack,
   RoomPhase,
   RoomState,
   Track,
 } from "../../shared/types.ts";
 import { MIN_PLAYERS } from "../../shared/types.ts";
-import { searchItunes, uniqueTracks } from "./itunes.ts";
+import { fetchChart, resolvePlaylist, uniqueTracks } from "./itunes.ts";
 import { matchesSong } from "./match.ts";
-import { pickSeeds } from "./seeds.ts";
+import { isBuzzerChart } from "./seeds.ts";
 
 const MAX_PLAYERS = 10;
 const PREVIEW_MS = 30_000;
@@ -25,6 +26,8 @@ const MISS_SUBMIT_PENALTY = -15;
 const MISS_SUBMIT_POPUP = "-15pts penalty for not submitting a song";
 const BUZZ_MS = 12_000;
 const REVEAL_MS = 10_000;
+const CLIP_RESULT_MS = 4_000;
+const RECAP_MS = 12_000;
 const AUX_LISTEN_MS = 18_000;
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -75,11 +78,15 @@ export class Room {
   players: Player[] = [];
   round = 0;
   totalRounds = 5;
-  queue: QueuedTrack[] = [];
+  isPrivate = true;
+  buzzerChart: BuzzerChartId = "top100";
+  buzzerPlaylists: BuzzerPlaylist[] = [];
+  invitedIds = new Set<string>();
   lastDeltas: Record<string, number> | null = null;
 
   private timers: ReturnType<typeof setTimeout>[] = [];
   private buzzerPlaylist: Track[] = [];
+  private buzzerPlaylistTracks = new Map<string, Track[]>();
   private buzzerTrack: Track | null = null;
   private playStartedAt: number | null = null;
   private buzzedBy: string | null = null;
@@ -97,6 +104,8 @@ export class Room {
   private impostorOrder: ImpostorSub[] = [];
   private impostorIndex = 0;
   private impostorGuesses = new Map<string, ImpostorGuess>();
+  private impostorPoints = new Map<string, number>();
+  private impostorCycle = 0;
   private roundEndsAt: number | null = null;
 
   private theme = "";
@@ -143,6 +152,7 @@ export class Room {
   }
 
   private later(ms: number, fn: () => void) {
+    this.clearTimers();
     this.timerEndsAt = Date.now() + ms;
     this.timerDurationMs = ms;
     this.timers.push(setTimeout(fn, ms));
@@ -200,8 +210,8 @@ export class Room {
       this.emit();
       return;
     }
-    if (this.phase !== "lobby") {
-      throw new Error("That party already started. Catch the next round.");
+    if (this.phase === "podium") {
+      throw new Error("This party already wrapped. Catch the next one.");
     }
     if (this.players.length >= MAX_PLAYERS) {
       throw new Error("Room is full (10 players).");
@@ -225,7 +235,6 @@ export class Room {
     p.connected = false;
     if (this.phase === "lobby") {
       this.players = this.players.filter((x) => x.id !== playerId);
-      this.queue = this.queue.filter((q) => q.addedBy !== playerId);
     }
     if (this.hostId === playerId) {
       const next = this.connectedPlayers()[0] || this.players[0];
@@ -272,21 +281,52 @@ export class Room {
     this.emit();
   }
 
-  queueTrack(playerId: string, track: Track) {
+  setPrivate(playerId: string, isPrivate: boolean) {
+    this.requireHost(playerId);
     this.requireLobby();
-    if (!this.player(playerId)) throw new Error("Join the room first.");
-    if (this.queue.some((q) => q.trackId === track.trackId)) {
-      throw new Error("That track is already in the mix.");
-    }
-    if (this.queue.length >= 20) throw new Error("Queue is full.");
-    this.queue.push({ ...track, addedBy: playerId });
+    this.isPrivate = Boolean(isPrivate);
     this.emit();
   }
 
-  clearQueue(playerId: string) {
+  invitePlayer(playerId: string, friendId: string) {
+    if (!this.player(playerId)) throw new Error("Join the room first.");
+    this.invitedIds.add(friendId);
+  }
+
+  canJoinWithoutCode(userId: string) {
+    if (!this.isPrivate) return true;
+    if (this.invitedIds.has(userId)) return true;
+    return Boolean(this.player(userId));
+  }
+
+  setBuzzerChart(playerId: string, chart: BuzzerChartId) {
     this.requireHost(playerId);
     this.requireLobby();
-    this.queue = [];
+    if (this.mode !== "buzzer") throw new Error("Charts are for Buzzer Beater.");
+    if (!isBuzzerChart(chart)) throw new Error("Pick a chart.");
+    this.buzzerChart = chart;
+    this.emit();
+  }
+
+  async addBuzzerPlaylist(playerId: string, url: string) {
+    this.requireHost(playerId);
+    this.requireLobby();
+    if (this.mode !== "buzzer") throw new Error("Playlists are for Buzzer Beater.");
+    if (this.buzzerPlaylists.length >= 6) throw new Error("That's enough playlists for one night.");
+    const { label, tracks } = await resolvePlaylist(url);
+    if (this.buzzerPlaylists.some((p) => p.url === url.trim())) {
+      throw new Error("That playlist is already in the mix.");
+    }
+    this.buzzerPlaylists.push({ url: url.trim(), label, trackCount: tracks.length });
+    this.buzzerPlaylistTracks.set(url.trim(), tracks);
+    this.emit();
+  }
+
+  removeBuzzerPlaylist(playerId: string, url: string) {
+    this.requireHost(playerId);
+    this.requireLobby();
+    this.buzzerPlaylists = this.buzzerPlaylists.filter((p) => p.url !== url);
+    this.buzzerPlaylistTracks.delete(url);
     this.emit();
   }
 
@@ -302,6 +342,7 @@ export class Room {
     this.penaltyPopupIds.clear();
     this.round = 0;
     this.usedTrackIds.clear();
+    this.impostorCycle = 0;
 
     if (this.mode === "classic") {
       this.round = 0;
@@ -312,7 +353,7 @@ export class Room {
     if (this.mode === "buzzer") {
       await this.prepareBuzzerPlaylist();
       if (this.buzzerPlaylist.length === 0) {
-        throw new Error("Couldn't load tracks from iTunes. Queue some songs or try again.");
+        throw new Error("Couldn't load tracks. Try another chart, add a playlist, or try again.");
       }
       this.totalRounds = Math.min(this.totalRounds, this.buzzerPlaylist.length);
       this.beginBuzzerRound();
@@ -320,16 +361,7 @@ export class Room {
     }
 
     if (this.mode === "impostor") {
-      this.clearTimers();
-      this.impostorSubs.clear();
-      this.impostorGuesses.clear();
-      this.impostorOrder = [];
-      this.impostorIndex = 0;
-      this.phase = "impostor_submit";
-      this.later(SUBMIT_MS, () => {
-        if (this.phase === "impostor_submit") this.beginImpostorPlayback();
-      });
-      this.emit();
+      this.beginImpostorSubmit();
       return;
     }
 
@@ -408,7 +440,7 @@ export class Room {
     if (!current) throw new Error("No track playing.");
     if (!this.player(playerId)) throw new Error("You're not in this room.");
     if (current.playerId === playerId && this.connectedPlayers().length > 1) {
-      throw new Error("You queued this one — sit it out.");
+      throw new Error("You picked this one — sit it out.");
     }
     if (this.classicScored.has(playerId)) {
       throw new Error("You already locked this clip.");
@@ -447,18 +479,18 @@ export class Room {
   }
 
   private async prepareBuzzerPlaylist() {
-    const queued = uniqueTracks(this.queue.map(({ addedBy: _a, ...t }) => t));
-    let extra: Track[] = [];
-    if (queued.length < this.totalRounds) {
-      const seeds = pickSeeds(3);
-      const found = (
-        await Promise.all(seeds.map((s) => searchItunes(s, 20).catch(() => [] as Track[])))
-      ).flat();
-      extra = shuffle(uniqueTracks(found)).filter((t) =>
-        queued.every((q) => q.trackId !== t.trackId),
-      );
+    const fromPlaylists = uniqueTracks(
+      this.buzzerPlaylists.flatMap((p) => this.buzzerPlaylistTracks.get(p.url) || []),
+    );
+    let extras: Track[] = [];
+    if (fromPlaylists.length < Math.max(this.totalRounds, 8)) {
+      extras = await fetchChart(this.buzzerChart).catch(() => [] as Track[]);
     }
-    this.buzzerPlaylist = [...queued, ...extra].slice(0, Math.max(this.totalRounds, 1));
+    const mixed = uniqueTracks([
+      ...fromPlaylists,
+      ...extras.filter((t) => fromPlaylists.every((q) => q.trackId !== t.trackId)),
+    ]);
+    this.buzzerPlaylist = shuffle(mixed).slice(0, Math.max(this.totalRounds, 1));
   }
 
   private beginBuzzerRound() {
@@ -491,7 +523,7 @@ export class Room {
     }
     if (!this.player(playerId)) throw new Error("You're not in this room.");
     if (this.eliminated.has(playerId)) {
-      throw new Error("You already burned this round.");
+      throw new Error("You already burned this clip — hang tight for the next song.");
     }
     this.buzzedBy = playerId;
     this.buzzDeadline = Date.now() + BUZZ_MS;
@@ -568,6 +600,10 @@ export class Room {
       this.nextImpostorOrFinish();
       return;
     }
+    if (this.phase === "impostor_recap") {
+      this.afterImpostorRecap();
+      return;
+    }
     if (this.phase === "aux_listen") {
       this.nextAuxListen();
       return;
@@ -626,27 +662,50 @@ export class Room {
     return needed.length > 0 && needed.every((p) => map.has(p.id));
   }
 
+  private beginImpostorSubmit() {
+    this.clearTimers();
+    this.impostorSubs.clear();
+    this.impostorGuesses.clear();
+    this.impostorPoints.clear();
+    this.impostorOrder = [];
+    this.impostorIndex = 0;
+    this.impostorCycle += 1;
+    this.round = this.impostorCycle;
+    this.lastDeltas = null;
+    if (this.impostorCycle > this.totalRounds) {
+      this.finishGame();
+      return;
+    }
+    this.phase = "impostor_submit";
+    this.later(SUBMIT_MS, () => {
+      if (this.phase === "impostor_submit") this.beginImpostorPlayback();
+    });
+    this.emit();
+  }
+
   private beginImpostorPlayback() {
     this.clearTimers();
-    this.penalizeMissingSubmissions(this.impostorSubs);
     this.impostorOrder = shuffle(
       [...this.impostorSubs.entries()].map(([playerId, track]) => ({ playerId, track })),
     );
     this.impostorIndex = 0;
-    this.totalRounds = this.impostorOrder.length;
-    this.startImpostorRound();
+    if (this.impostorOrder.length === 0) {
+      this.afterImpostorRecap();
+      return;
+    }
+    this.startImpostorClip();
   }
 
-  private startImpostorRound() {
+  private startImpostorClip() {
     this.clearTimers();
     const current = this.impostorOrder[this.impostorIndex];
     if (!current) {
-      this.finishGame();
+      this.beginImpostorRecap();
       return;
     }
-    this.round = this.impostorIndex + 1;
     this.impostorGuesses.clear();
-    if (this.impostorIndex > 0) this.lastDeltas = null;
+    this.impostorPoints.clear();
+    this.lastDeltas = null;
     this.playStartedAt = Date.now();
     this.roundEndsAt = Date.now() + PREVIEW_MS;
     this.phase = "impostor_playing";
@@ -666,41 +725,46 @@ export class Room {
       throw new Error("You added this one — sit it out.");
     }
     if (!guess.submitterId) throw new Error("Pick who you think added it.");
-    this.impostorGuesses.set(playerId, {
-      title: guess.title.trim(),
-      artist: (guess.artist || "").trim(),
-      submitterId: guess.submitterId,
-    });
+    if (!this.player(guess.submitterId)) throw new Error("That player isn't in the room.");
+    if (this.impostorGuesses.has(playerId)) {
+      throw new Error("You already locked this one in.");
+    }
+    this.impostorGuesses.set(playerId, { submitterId: guess.submitterId });
+    const guessers = this.impostorGuessers();
+    if (guessers.length > 0 && guessers.every((p) => this.impostorGuesses.has(p.id))) {
+      this.impostorReveal();
+      return;
+    }
     this.emit();
+  }
+
+  private impostorGuessers() {
+    const current = this.impostorOrder[this.impostorIndex];
+    return this.connectedPlayers().filter((p) => p.id !== current?.playerId);
   }
 
   private impostorReveal() {
     this.clearTimers();
     const current = this.impostorOrder[this.impostorIndex];
     if (!current) {
-      this.finishGame();
+      this.beginImpostorRecap();
       return;
     }
+    const remainingSec = Math.max(
+      0,
+      Math.ceil(((this.playStartedAt || Date.now()) + PREVIEW_MS - Date.now()) / 1000),
+    );
     const deltas: Record<string, number> = {};
-    let identified = 0;
-    for (const [pid, guess] of this.impostorGuesses) {
-      const songOk = matchesSong(guess.title, current.track.title);
-      const whoOk = guess.submitterId === current.playerId;
-      if (songOk) {
-        deltas[pid] = (deltas[pid] || 0) + 80;
-      }
-      if (whoOk) {
-        deltas[pid] = (deltas[pid] || 0) + 70;
-        identified += 1;
-      }
-    }
-    const guessers = this.connectedPlayers().filter((p) => p.id !== current.playerId);
-    if (guessers.length > 0 && identified < Math.ceil(guessers.length / 2)) {
-      deltas[current.playerId] = (deltas[current.playerId] || 0) + 40;
+    for (const p of this.impostorGuessers()) {
+      const guess = this.impostorGuesses.get(p.id);
+      const ok = guess?.submitterId === current.playerId;
+      const points = ok ? 20 + remainingSec : 0;
+      this.impostorPoints.set(p.id, points);
+      if (points) deltas[p.id] = points;
     }
     this.award(deltas);
     this.phase = "impostor_reveal";
-    this.later(REVEAL_MS, () => this.nextImpostorOrFinish());
+    this.later(CLIP_RESULT_MS, () => this.nextImpostorOrFinish());
     this.emit();
   }
 
@@ -708,10 +772,26 @@ export class Room {
     this.clearTimers();
     this.impostorIndex += 1;
     if (this.impostorIndex >= this.impostorOrder.length) {
+      this.beginImpostorRecap();
+      return;
+    }
+    this.startImpostorClip();
+  }
+
+  private beginImpostorRecap() {
+    this.clearTimers();
+    this.phase = "impostor_recap";
+    this.later(RECAP_MS, () => this.afterImpostorRecap());
+    this.emit();
+  }
+
+  private afterImpostorRecap() {
+    this.clearTimers();
+    if (this.impostorCycle >= this.totalRounds) {
       this.finishGame();
       return;
     }
-    this.startImpostorRound();
+    this.beginImpostorSubmit();
   }
 
   setTheme(playerId: string, theme: string) {
@@ -844,6 +924,8 @@ export class Room {
     this.impostorSubs.clear();
     this.impostorOrder = [];
     this.impostorGuesses.clear();
+    this.impostorPoints.clear();
+    this.impostorCycle = 0;
     this.auxSubs.clear();
     this.auxEntries = [];
     this.auxVotes.clear();
@@ -866,7 +948,9 @@ export class Room {
       serverNow: Date.now(),
       timerEndsAt: this.timerEndsAt,
       timerDurationMs: this.timerDurationMs,
-      queue: this.queue,
+      isPrivate: this.isPrivate,
+      buzzerChart: this.buzzerChart,
+      buzzerPlaylists: this.buzzerPlaylists,
       classic: this.classicView(playerId),
       buzzer: this.buzzerView(),
       impostor: this.impostorView(playerId),
@@ -936,41 +1020,40 @@ export class Room {
     if (
       this.phase !== "impostor_submit" &&
       this.phase !== "impostor_playing" &&
-      this.phase !== "impostor_reveal"
+      this.phase !== "impostor_reveal" &&
+      this.phase !== "impostor_recap"
     ) {
       return null;
     }
     const current = this.impostorOrder[this.impostorIndex];
-    const showReveal = this.phase === "impostor_reveal" && current;
+    const showClip =
+      (this.phase === "impostor_playing" || this.phase === "impostor_reveal") && current;
+    const guessers = this.connectedPlayers().filter((p) => p.id !== current?.playerId);
     return {
       submittedIds: [...this.impostorSubs.keys()],
       playStartedAt: this.playStartedAt,
       previewMs: PREVIEW_MS,
       roundEndsAt: this.roundEndsAt,
-      track: current
+      track: showClip
         ? this.phase === "impostor_reveal"
           ? revealTrack(current.track)
-          : this.phase === "impostor_playing"
-            ? maskTrack(current.track)
-            : null
+          : maskTrack(current.track)
         : null,
-      isYours: Boolean(current && current.playerId === playerId),
+      isYours: Boolean(current && current.playerId === playerId && this.phase !== "impostor_submit"),
       yourSubmission: this.impostorSubs.get(playerId) || null,
       yourGuess: this.impostorGuesses.get(playerId) || null,
-      reveal: showReveal
-        ? {
-            track: current.track,
-            submitterId: current.playerId,
-            submitterName: this.player(current.playerId)?.name || "Unknown",
-            guesses: [...this.impostorGuesses.entries()].map(([pid, guess]) => ({
-              playerId: pid,
-              playerName: this.player(pid)?.name || "Unknown",
-              ...guess,
-              songOk: matchesSong(guess.title, current.track.title),
-              whoOk: guess.submitterId === current.playerId,
-            })),
-          }
-        : null,
+      guessedCount: this.impostorGuesses.size,
+      guesserTotal: guessers.length,
+      clipIndex: this.impostorIndex,
+      clipTotal: this.impostorOrder.length,
+      yourPoints: this.impostorPoints.get(playerId) ?? null,
+      recap:
+        this.phase === "impostor_recap"
+          ? this.impostorOrder.map((entry) => ({
+              track: entry.track,
+              submitterName: this.player(entry.playerId)?.name || "Unknown",
+            }))
+          : null,
     };
   }
 
@@ -1028,10 +1111,19 @@ export class RoomManager {
     return this.rooms.get(code.toUpperCase());
   }
 
-  create(identity: Identity, mode?: GameMode) {
+  findByPlayer(playerId: string) {
+    for (const room of this.rooms.values()) {
+      const player = room.players.find((p) => p.id === playerId && p.connected);
+      if (player) return room;
+    }
+    return undefined;
+  }
+
+  create(identity: Identity, mode?: GameMode, isPrivate = true) {
     const code = makeRoomCode(new Set(this.rooms.keys()));
     const room = new Room(code, identity);
     if (mode) room.mode = mode;
+    room.isPrivate = Boolean(isPrivate);
     room.onEmpty = () => this.remove(code);
     this.rooms.set(code, room);
     return room;
@@ -1039,7 +1131,7 @@ export class RoomManager {
 
   listLobbies() {
     return [...this.rooms.values()]
-      .filter((room) => room.phase === "lobby")
+      .filter((room) => room.phase === "lobby" && !room.isPrivate)
       .map((room) => {
         const host = room.players.find((p) => p.isHost) || room.players[0];
         return {

@@ -4,10 +4,10 @@ import { config as loadEnv } from "dotenv";
 
 try {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-  loadEnv({ path: path.join(root, ".env") });
+  loadEnv({ path: path.join(root, ".env"), override: true, quiet: true });
 } catch {
   try {
-    loadEnv();
+    loadEnv({ override: true, quiet: true });
   } catch {
     /* Vercel injects env vars. */
   }
@@ -20,7 +20,11 @@ function httpsUrl(host: string) {
 export const SUPABASE_URL = (
   process.env.SUPABASE_URL || "https://xgypeovqxzazhbucguzt.supabase.co"
 ).replace(/\/$/, "");
-export const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+export const SUPABASE_SERVICE_ROLE_KEY = (
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SECRET_KEY ||
+  ""
+).trim();
 
 export const IS_PROD = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
 

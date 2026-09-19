@@ -15,6 +15,7 @@ import { ApiError, forgotPassword } from "../api";
 import { useAuth } from "../useAuth";
 import { getAvatar, nextAvatar, setAvatar, type AvatarId } from "../identity";
 import { runViewTransition } from "../transition";
+import FriendsPanel from "../components/FriendsPanel";
 import UserMenu from "../components/UserMenu";
 import { MIN_PLAYERS, type GameMode } from "@shared/types";
 
@@ -27,17 +28,17 @@ const HOWTO = [
   {
     step: "2. CLASSIC",
     title: "Pick, then guess",
-    body: "Everyone has 30 seconds to queue a song. Then each pick plays and the room has 30 seconds to name it. Remaining seconds = your points. 2 players minimum.",
+    body: "Everyone has 30 seconds to pick a song. Then each pick plays and the room has 30 seconds to name it. Remaining seconds = your points. 2 players minimum.",
   },
   {
     step: "3. BUZZER BEATER",
     title: "Fastest finger",
-    body: "A high-speed race to identify the song before anyone else beats you to the buzz. 2 players minimum.",
+    body: "A high-speed race to identify the song before anyone else beats you to the buzz. Hits charts by default, or paste a playlist. 2 players minimum.",
   },
   {
     step: "4. WHO ADDED THIS?",
     title: "Call out the culprit",
-    body: "Secretly submit a guilty pleasure. Points go to whoever guesses the song and which friend queued it. 3 players minimum.",
+    body: "Everyone sneaks in a song. Guess who added it — not the title. Right person scores 20 plus seconds left. 3 players minimum.",
   },
   {
     step: "5. PASS THE AUX",
@@ -50,7 +51,7 @@ const GAME_MODES: { id: GameMode; title: string; body: string }[] = [
   {
     id: "classic",
     title: "Classic",
-    body: "Queue a song, then guess every clip. Seconds left on the clock are your points.",
+    body: "Pick a song, then guess every clip. Seconds left on the clock are your points.",
   },
   {
     id: "buzzer",
@@ -60,7 +61,7 @@ const GAME_MODES: { id: GameMode; title: string; body: string }[] = [
   {
     id: "impostor",
     title: "Who Added This?",
-    body: "Name the track and the friend who snuck it in.",
+    body: "Name the friend who snuck it in. Right guess = 20 points plus seconds left.",
   },
   {
     id: "aux",
@@ -671,6 +672,11 @@ export default function Landing() {
           <button className="text-link back-link back-pill" type="button" onClick={() => goScreen("identity")}>
             ‹ Back to character
           </button>
+          {auth.user && (
+            <div className="play-friends">
+              <FriendsPanel />
+            </div>
+          )}
         </main>
       )}
     </div>

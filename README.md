@@ -31,15 +31,17 @@ Needs at least 2 players.
 
 ### Buzzer Beater
 
-A high-speed race to identify the song before anyone else beats you to the buzz. The room hears a 30-second iTunes preview. First to buzz gets a short window to type the title. Correct answers score fast-finger points; a miss burns you for that clip.
+A high-speed race to identify the song before anyone else beats you to the buzz. The room hears a 30-second iTunes preview. First to buzz gets a short window to type the title. Correct answers score fast-finger points; a miss burns you for that clip only.
 
-If nobody queues songs in the lobby, the host still starts a mixed seed catalogue (80s/90s/pop/hip-hop/indie, etc.) from iTunes.
+By default the mix is **today's top hits** (iTunes Top 100). The host can pick another chart (pop, hip-hop, rock, dance, and more) or paste public Spotify / Apple Music playlist links before starting.
 
 Needs at least 2 players.
 
 ### Who Added This? (Impostor)
 
-Secretly submit your guilty pleasures, middle school throwbacks, or hype tracks. Each clip is anonymous. Points go to whoever guesses the song **and** correctly calls out which friend added it. The submitter sits that clip out — and scores a small bonus if fewer than half the room spots them.
+Everyone secretly picks one song. Each clip plays for up to 30 seconds while everyone else taps a name — you only guess who added it, not the title. The person whose song it is sits that clip out. A correct guess scores **20 + seconds left**. A wrong guess scores **0 for that clip**. Who added each song stays hidden until every song in the round has played.
+
+One round = everyone has put a song down. 5 rounds in a 5-player lobby means 25 songs.
 
 Needs at least 3 players.
 
@@ -52,10 +54,16 @@ Needs at least 3 players.
 ## Accounts
 
 - **Guest:** type a display name on the home screen and jump in.
-- **Sign up / log in:** username + password, stored in a local SQLite file at `server/data/auxparty.db` (Node's built-in `node:sqlite`). No email, no OAuth.
+- **Sign up / log in:** username + email + password, stored in Supabase. Friends, DMs, and invites need an account.
+
+## Friends
+
+Logged-in players can add each other by username, message, invite someone into a lobby, or join a friend who is already in a **public** party (private lobbies still need the code or an invite). Tick **Private lobby** in the room if you don't want friends dropping in from the friends list.
+
+Run `supabase/schema-friends.sql` in the Supabase SQL editor once so friend requests and DMs persist.
 
 ## Draft limits
 
-- Song catalogue is the public iTunes Search API (no Spotify playlist import).
+- Song previews come from the public iTunes Search / RSS APIs.
+- Spotify and Apple Music playlist import reads public playlist pages, then matches tracks on iTunes so the 30-second preview can play.
 - Rooms live in memory; they vanish when the server restarts.
-- Localhost only.

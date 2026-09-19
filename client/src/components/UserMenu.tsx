@@ -65,6 +65,9 @@ export default function UserMenu() {
           <Link className="user-menu-item" role="menuitem" to="/account" viewTransition onClick={() => setOpen(false)}>
             Profile
           </Link>
+          <Link className="user-menu-item" role="menuitem" to="/friends" viewTransition onClick={() => setOpen(false)}>
+            Friends
+          </Link>
           <Link className="user-menu-item" role="menuitem" to="/account/stats" viewTransition onClick={() => setOpen(false)}>
             Stats
           </Link>

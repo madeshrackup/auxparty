@@ -18,6 +18,7 @@ export type RoomPhase =
   | "impostor_submit"
   | "impostor_playing"
   | "impostor_reveal"
+  | "impostor_recap"
   | "aux_theme"
   | "aux_submit"
   | "aux_listen"
@@ -79,16 +80,12 @@ export type ClassicView = {
 };
 
 export type ImpostorGuess = {
-  title: string;
-  artist?: string;
   submitterId: string;
 };
 
-export type ImpostorGuessResult = ImpostorGuess & {
-  playerId: string;
-  playerName: string;
-  songOk: boolean;
-  whoOk: boolean;
+export type ImpostorRecapEntry = {
+  track: Track;
+  submitterName: string;
 };
 
 export type ImpostorView = {
@@ -100,12 +97,45 @@ export type ImpostorView = {
   isYours: boolean;
   yourSubmission: Track | null;
   yourGuess: ImpostorGuess | null;
-  reveal: {
-    track: Track;
-    submitterId: string;
-    submitterName: string;
-    guesses: ImpostorGuessResult[];
-  } | null;
+  guessedCount: number;
+  guesserTotal: number;
+  clipIndex: number;
+  clipTotal: number;
+  yourPoints: number | null;
+  recap: ImpostorRecapEntry[] | null;
+};
+
+export type BuzzerChartId =
+  | "top100"
+  | "pop"
+  | "hiphop"
+  | "rock"
+  | "dance"
+  | "alternative"
+  | "rnb"
+  | "country"
+  | "latin"
+  | "electronic"
+  | "kpop";
+
+export const BUZZER_CHARTS: { id: BuzzerChartId; label: string }[] = [
+  { id: "top100", label: "Today's Top Hits" },
+  { id: "pop", label: "Pop" },
+  { id: "hiphop", label: "Hip-Hop & Rap" },
+  { id: "rock", label: "Rock" },
+  { id: "dance", label: "Dance" },
+  { id: "alternative", label: "Alternative" },
+  { id: "rnb", label: "R&B" },
+  { id: "country", label: "Country" },
+  { id: "latin", label: "Latin" },
+  { id: "electronic", label: "Electronic" },
+  { id: "kpop", label: "K-Pop" },
+];
+
+export type BuzzerPlaylist = {
+  url: string;
+  label: string;
+  trackCount: number;
 };
 
 export type AuxEntry = {
@@ -129,10 +159,6 @@ export type AuxView = {
   votedCount: number;
 };
 
-export type QueuedTrack = Track & {
-  addedBy: string;
-};
-
 export type RoomPopup = {
   id: number;
   message: string;
@@ -150,13 +176,55 @@ export type RoomState = {
   serverNow: number;
   timerEndsAt: number | null;
   timerDurationMs: number;
-  queue: QueuedTrack[];
+  isPrivate: boolean;
+  buzzerChart: BuzzerChartId;
+  buzzerPlaylists: BuzzerPlaylist[];
   classic: ClassicView | null;
   buzzer: BuzzerView | null;
   impostor: ImpostorView | null;
   aux: AuxView | null;
   lastDeltas: Record<string, number> | null;
   popup: RoomPopup | null;
+};
+
+export type FriendPresence = {
+  id: string;
+  username: string;
+  avatarUrl: string | null;
+  online: boolean;
+  roomCode: string | null;
+  mode: GameMode | null;
+  inGame: boolean;
+  isPrivate: boolean;
+  canJoin: boolean;
+};
+
+export type FriendRequest = {
+  id: string;
+  username: string;
+  avatarUrl: string | null;
+};
+
+export type FriendMessage = {
+  id: string;
+  fromId: string;
+  toId: string;
+  body: string;
+  createdAt: number;
+};
+
+export type PartyInvite = {
+  fromId: string;
+  fromName: string;
+  code: string;
+  mode: GameMode;
+};
+
+export type SocialState = {
+  friends: FriendPresence[];
+  incoming: FriendRequest[];
+  outgoing: FriendRequest[];
+  invites: PartyInvite[];
 };
 
 export type AuthUser = {
