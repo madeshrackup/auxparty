@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Avatar from "../components/Avatar";
 import ModeGlyph from "../components/ModeGlyph";
 import {
-  IconGlobe,
   IconPeople,
   PersonBadge,
   VibeIcon,
@@ -16,6 +15,7 @@ import { useAuth } from "../useAuth";
 import { getAvatar, nextAvatar, setAvatar, type AvatarId } from "../identity";
 import { runViewTransition } from "../transition";
 import FriendsPanel from "../components/FriendsPanel";
+import TrophyLink from "../components/TrophyLink";
 import UserMenu from "../components/UserMenu";
 import { MIN_PLAYERS, type GameMode } from "@shared/types";
 
@@ -80,6 +80,8 @@ const HOST_STEPS: { tone: GameMode; title: string; blurb: string }[] = [
 export default function Landing() {
   const auth = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<"anon" | "auth">(auth.user ? "auth" : "anon");
   const [screen, setScreen] = useState<"identity" | "play" | "modes">("identity");
   const [avatar, setAvatarState] = useState<AvatarId>(getAvatar);
@@ -233,9 +235,25 @@ export default function Landing() {
 
   const how = HOWTO[slide];
 
+  function openSignup() {
+    resetSocket();
+    setError("");
+    setTab("auth");
+    setAuthMode("register");
+    setForgotSent(false);
+    goScreen("identity");
+  }
+
   useEffect(() => {
     if (auth.user) setTab("auth");
   }, [auth.user]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("signup") !== "1") return;
+    openSignup();
+    setSearchParams({}, { replace: true });
+  }, [location.search]);
 
   return (
     <div className="home">
@@ -263,9 +281,7 @@ export default function Landing() {
         </div>
       )}
       <header className="home-top">
-        <span className="lang-pill">
-          <IconGlobe /> EN
-        </span>
+        <TrophyLink />
         <Link to="/" className="brand">
           <span className="brand-mark" aria-hidden />
           <span className="brand-name">AUX PARTY</span>
@@ -290,6 +306,7 @@ export default function Landing() {
                 onClick={() => {
                   resetSocket();
                   setTab("anon");
+                  if (auth.user) void auth.logout();
                 }}
               >
                 Anonymous
@@ -610,73 +627,46 @@ export default function Landing() {
               </div>
             </div>
           </section>
-          <section className="g-card play-card join-card">
-            <div className="play-hero">
-              <PersonBadge />
-              <div>
-                <p className="lime-title">Join a room</p>
-                <p className="play-copy">Enter the 4-character code on the host's screen.</p>
+          <div className="play-right">
+            <section className="g-card play-card join-card join-card-slim">
+              <div className="play-hero">
+                <PersonBadge />
+                <div>
+                  <p className="lime-title">Join a game</p>
+                  <p className="play-copy">Enter the code on the host's screen.</p>
+                </div>
               </div>
-            </div>
-            <div className="code-wrap">
-              <input
-                className="nick-input code-input"
-                value={code}
-                maxLength={4}
-                placeholder="CODE"
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
-              />
-              {code && (
-                <button className="code-clear" type="button" onClick={() => setCode("")} aria-label="Clear code">
-                  ×
+              <div className="join-slim-row">
+                <div className="code-wrap">
+                  <input
+                    className="nick-input code-input"
+                    value={code}
+                    maxLength={4}
+                    placeholder="CODE"
+                    onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  />
+                  {code && (
+                    <button className="code-clear" type="button" onClick={() => setCode("")} aria-label="Clear code">
+                      ×
+                    </button>
+                  )}
+                </div>
+                <button
+                  className="start-btn alt"
+                  disabled={busy || code.trim().length < 4}
+                  type="button"
+                  onClick={() => void joinRoom()}
+                >
+                  JOIN
                 </button>
-              )}
-            </div>
-            <div className="create-row">
-              <button
-                className="start-btn alt join-wide"
-                disabled={busy || code.trim().length < 4}
-                type="button"
-                onClick={() => void joinRoom()}
-              >
-                JOIN
-              </button>
-              <span className="scribble scribble-vibe">Get in and pick your vibe!</span>
-            </div>
-            <div className="how-it">
-              <p className="how-it-title">How it works</p>
-              <div className="how-steps">
-                <div>
-                  <span className="step-num">1</span>
-                  <span>Join or create a room</span>
-                </div>
-                <span className="how-arrow">→</span>
-                <div>
-                  <span className="step-num">2</span>
-                  <span>Listen to a snippet</span>
-                </div>
-                <span className="how-arrow">→</span>
-                <div>
-                  <span className="step-num">3</span>
-                  <span>Guess the song</span>
-                </div>
-                <span className="how-arrow">→</span>
-                <div>
-                  <span className="step-num">4</span>
-                  <span>Get points &amp; win</span>
-                </div>
               </div>
-            </div>
-          </section>
+            </section>
+            <FriendsPanel onRegister={openSignup} />
+          </div>
           <p className="error play-error">{error}</p>
           <button className="text-link back-link back-pill" type="button" onClick={() => goScreen("identity")}>
             ‹ Back to character
           </button>
-          {auth.user && (
-            <div className="play-friends">
-              <FriendsPanel />
-            </div>
-          )}
         </main>
       )}
     </div>

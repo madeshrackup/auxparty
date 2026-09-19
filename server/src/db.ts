@@ -332,10 +332,14 @@ export type FriendAccount = {
   id: string;
   username: string;
   avatar_path: string | null;
+  message?: string | null;
 };
 
-function asFriendAccount(row: { id: string; username: string; avatar_path?: string | null }): FriendAccount {
-  return { id: row.id, username: row.username, avatar_path: row.avatar_path ?? null };
+function asFriendAccount(
+  row: { id: string; username: string; avatar_path?: string | null },
+  message?: string | null,
+): FriendAccount {
+  return { id: row.id, username: row.username, avatar_path: row.avatar_path ?? null, message: message || null };
 }
 
 function socialError(error: { message?: string } | null, fallback: string) {
@@ -356,32 +360,77 @@ export async function listFriendAccounts(userId: string): Promise<FriendAccount[
   if (ids.length === 0) return [];
   const { data, error } = await sb().from("accounts").select("id, username, avatar_path").in("id", ids);
   if (error) socialError(error, "Could not load friends.");
-  return ((data || []) as { id: string; username: string; avatar_path: string | null }[]).map(asFriendAccount);
+  return ((data || []) as { id: string; username: string; avatar_path: string | null }[]).map((row) =>
+    asFriendAccount(row),
+  );
 }
 
 export async function listFriendRequests(userId: string): Promise<{
   incoming: FriendAccount[];
   outgoing: FriendAccount[];
 }> {
-  const { data: incoming, error: inErr } = await sb()
+  const incoming = await loadRequestSide(userId, "incoming");
+  const outgoing = await loadRequestSide(userId, "outgoing");
+  return { incoming, outgoing };
+}
+
+async function loadRequestSide(userId: string, side: "incoming" | "outgoing"): Promise<FriendAccount[]> {
+  const selfCol = side === "incoming" ? "to_id" : "from_id";
+  const otherCol = side === "incoming" ? "from_id" : "to_id";
+  const first = await sb()
     .from("friend_requests")
-    .select("from_id, accounts:from_id (id, username, avatar_path)")
-    .eq("to_id", userId);
-  if (inErr) socialError(inErr, "Could not load friend requests.");
-  const { data: outgoing, error: outErr } = await sb()
-    .from("friend_requests")
-    .select("to_id, accounts:to_id (id, username, avatar_path)")
-    .eq("from_id", userId);
-  if (outErr) socialError(outErr, "Could not load friend requests.");
-  const incomingAcc = ((incoming || []) as { accounts?: FriendAccount | FriendAccount[] | null }[])
-    .map((row) => (Array.isArray(row.accounts) ? row.accounts[0] : row.accounts))
-    .filter((row): row is FriendAccount => Boolean(row))
-    .map(asFriendAccount);
-  const outgoingAcc = ((outgoing || []) as { accounts?: FriendAccount | FriendAccount[] | null }[])
-    .map((row) => (Array.isArray(row.accounts) ? row.accounts[0] : row.accounts))
-    .filter((row): row is FriendAccount => Boolean(row))
-    .map(asFriendAccount);
-  return { incoming: incomingAcc, outgoing: outgoingAcc };
+    .select(`${otherCol}, message, accounts:${otherCol} (id, username, avatar_path)`)
+    .eq(selfCol, userId);
+  const usedMessage = !first.error;
+  const result = first.error
+    ? await sb()
+        .from("friend_requests")
+        .select(`${otherCol}, accounts:${otherCol} (id, username, avatar_path)`)
+        .eq(selfCol, userId)
+    : first;
+  if (result.error) socialError(result.error, "Could not load friend requests.");
+  return ((result.data || []) as {
+    message?: string | null;
+    accounts?: FriendAccount | FriendAccount[] | null;
+  }[])
+    .map((row) => {
+      const account = Array.isArray(row.accounts) ? row.accounts[0] : row.accounts;
+      return account ? asFriendAccount(account, usedMessage ? row.message : null) : null;
+    })
+    .filter((row): row is FriendAccount => Boolean(row));
+}
+
+export async function searchAccounts(
+  userId: string,
+  query: string,
+): Promise<(FriendAccount & { status: "none" | "friends" | "outgoing" | "incoming" })[]> {
+  const q = query.trim().toLowerCase().replace(/[%_]/g, "");
+  if (q.length < 2) return [];
+  const { data, error } = await sb()
+    .from("accounts")
+    .select("id, username, avatar_path")
+    .ilike("username_lower", `%${q}%`)
+    .neq("id", userId)
+    .limit(8);
+  if (error) socialError(error, "Could not search accounts.");
+  const rows = ((data || []) as { id: string; username: string; avatar_path: string | null }[]).map((row) =>
+    asFriendAccount(row),
+  );
+  if (rows.length === 0) return [];
+  const friendIds = new Set(await listFriendIds(userId));
+  const { incoming, outgoing } = await listFriendRequests(userId);
+  const incomingIds = new Set(incoming.map((row) => row.id));
+  const outgoingIds = new Set(outgoing.map((row) => row.id));
+  return rows.map((row) => ({
+    ...row,
+    status: friendIds.has(row.id)
+      ? "friends"
+      : outgoingIds.has(row.id)
+        ? "outgoing"
+        : incomingIds.has(row.id)
+          ? "incoming"
+          : "none",
+  }));
 }
 
 export async function areFriends(a: string, b: string): Promise<boolean> {
@@ -395,11 +444,16 @@ export async function areFriends(a: string, b: string): Promise<boolean> {
   return Boolean(data);
 }
 
-export async function createFriendRequest(fromId: string, username: string): Promise<FriendAccount> {
+export async function createFriendRequest(
+  fromId: string,
+  username: string,
+  message = "",
+): Promise<FriendAccount> {
   const target = await findUserByUsername(username);
   if (!target) throw new Error("No account with that username.");
   if (target.id === fromId) throw new Error("You can't add yourself.");
   if (await areFriends(fromId, target.id)) throw new Error("You're already friends.");
+  const note = message.trim().slice(0, 200);
 
   const { data: reverse } = await sb()
     .from("friend_requests")
@@ -412,11 +466,27 @@ export async function createFriendRequest(fromId: string, username: string): Pro
     return { id: target.id, username: target.username, avatar_path: target.avatar_path };
   }
 
-  const { error } = await sb().from("friend_requests").insert({
+  const row = {
     id: crypto.randomUUID(),
     from_id: fromId,
     to_id: target.id,
-  });
+    message: note || null,
+  };
+  const { error } = await sb().from("friend_requests").insert(row);
+  if (error && /message/.test(error.message || "")) {
+    const { error: retry } = await sb().from("friend_requests").insert({
+      id: row.id,
+      from_id: fromId,
+      to_id: target.id,
+    });
+    if (retry) {
+      if (/duplicate|unique/i.test(retry.message || "")) {
+        throw new Error("You already sent them a request.");
+      }
+      socialError(retry, "Could not send that request.");
+    }
+    return { id: target.id, username: target.username, avatar_path: target.avatar_path };
+  }
   if (error) {
     if (/duplicate|unique/i.test(error.message || "")) {
       throw new Error("You already sent them a request.");
@@ -502,4 +572,59 @@ export async function listFriendMessages(userId: string, otherId: string, limit 
     body: string;
     created_at: string;
   }[]).reverse();
+}
+
+export async function grantAchievement(userId: string, achievementId: string): Promise<void> {
+  try {
+    const { error } = await sb().from("achievements").upsert(
+      {
+        user_id: userId,
+        achievement_id: achievementId,
+      },
+      { onConflict: "user_id,achievement_id", ignoreDuplicates: true },
+    );
+    if (error && !/achievements|schema cache|does not exist/i.test(error.message || "")) {
+      return;
+    }
+  } catch {
+    /* trophies stay optional until schema-achievements.sql is applied */
+  }
+}
+
+export async function loadAchievements(userId: string): Promise<{
+  unlocked: { id: string; unlockedAt: number }[];
+  wins: number;
+}> {
+  await grantAchievement(userId, "welcome");
+  let wins = 0;
+  const winsRes = await sb().from("accounts").select("wins").eq("id", userId).maybeSingle();
+  if (!winsRes.error) wins = Number((winsRes.data as { wins?: number } | null)?.wins || 0);
+  if (wins >= 100) await grantAchievement(userId, "maestro");
+
+  const { data, error } = await sb()
+    .from("achievements")
+    .select("achievement_id, unlocked_at")
+    .eq("user_id", userId);
+  if (error) {
+    return { unlocked: [{ id: "welcome", unlockedAt: Date.now() }], wins };
+  }
+  return {
+    wins,
+    unlocked: ((data || []) as { achievement_id: string; unlocked_at: string }[]).map((row) => ({
+      id: row.achievement_id,
+      unlockedAt: Date.parse(row.unlocked_at) || Date.now(),
+    })),
+  };
+}
+
+export async function recordMatchWins(userIds: string[]): Promise<void> {
+  const unique = [...new Set(userIds.filter(Boolean))];
+  for (const userId of unique) {
+    const current = await sb().from("accounts").select("wins").eq("id", userId).maybeSingle();
+    if (current.error) continue;
+    const wins = Number((current.data as { wins?: number } | null)?.wins || 0) + 1;
+    const { error } = await sb().from("accounts").update({ wins }).eq("id", userId);
+    if (error) continue;
+    if (wins >= 100) await grantAchievement(userId, "maestro");
+  }
 }

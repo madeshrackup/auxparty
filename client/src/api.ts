@@ -92,6 +92,10 @@ export function saveAvatar(image: string, mime: string) {
   });
 }
 
+export function getAchievements() {
+  return api<import("@shared/types").AchievementsState>("/api/auth/achievements");
+}
+
 export function startPasswordChange(oldPassword: string, newPassword: string) {
   return api<{ challengeId: string }>("/api/auth/password-start", {
     method: "POST",

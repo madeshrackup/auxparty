@@ -11,6 +11,7 @@ import {
   listFriendMessages,
   listFriendRequests,
   removeFriend,
+  searchAccounts,
 } from "./db.ts";
 import type { Room } from "./rooms.ts";
 
@@ -67,18 +68,30 @@ export async function buildSocialState(
       id: row.id,
       username: row.username,
       avatarUrl: publicAvatarUrl(row.avatar_path),
+      message: row.message || null,
     })),
     outgoing: requests.outgoing.map((row) => ({
       id: row.id,
       username: row.username,
       avatarUrl: publicAvatarUrl(row.avatar_path),
+      message: row.message || null,
     })),
     invites: takeInvites(userId),
   };
 }
 
-export async function requestFriend(userId: string, username: string) {
-  return createFriendRequest(userId, username);
+export async function requestFriend(userId: string, username: string, message = "") {
+  return createFriendRequest(userId, username, message);
+}
+
+export async function searchFriends(userId: string, query: string) {
+  const rows = await searchAccounts(userId, query);
+  return rows.map((row) => ({
+    id: row.id,
+    username: row.username,
+    avatarUrl: publicAvatarUrl(row.avatar_path),
+    status: row.status,
+  }));
 }
 
 export async function acceptFriend(userId: string, fromId: string) {

@@ -14,10 +14,13 @@ create table if not exists public.friend_requests (
   id uuid primary key,
   from_id uuid not null references public.accounts(id) on delete cascade,
   to_id uuid not null references public.accounts(id) on delete cascade,
+  message text,
   created_at timestamptz not null default now(),
   unique (from_id, to_id),
   check (from_id <> to_id)
 );
+
+alter table public.friend_requests add column if not exists message text;
 
 create index if not exists friend_requests_to_id on public.friend_requests (to_id);
 

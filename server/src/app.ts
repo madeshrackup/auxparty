@@ -20,6 +20,7 @@ import {
   authBody,
   verifyEmailToken,
 } from "./auth.ts";
+import { loadAchievements } from "./db.ts";
 import { APP_URL } from "./env.ts";
 import { searchItunes } from "./itunes.ts";
 
@@ -56,6 +57,19 @@ app.get("/api/auth/me", async (req, res) => {
     res.json(authBody(user));
   } catch {
     res.json({ user: null });
+  }
+});
+
+app.get("/api/auth/achievements", async (req, res) => {
+  try {
+    const user = await getAuthedUser(req);
+    if (!user) {
+      res.json({ unlocked: [], wins: 0 });
+      return;
+    }
+    res.json(await loadAchievements(user.id));
+  } catch {
+    res.json({ unlocked: [], wins: 0 });
   }
 });
 

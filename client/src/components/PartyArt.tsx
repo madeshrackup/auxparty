@@ -86,6 +86,34 @@ export function IconSearch() {
   );
 }
 
+export function IconLock() {
+  return (
+    <svg className="friends-lock" viewBox="0 0 72 72" aria-hidden>
+      <rect x="14" y="32" width="44" height="32" rx="10" fill="#5a117c" stroke="#fff" strokeWidth="4" />
+      <path
+        d="M24 32v-9a12 12 0 0 1 24 0v9"
+        fill="none"
+        stroke="#c6ff3d"
+        strokeWidth="5"
+        strokeLinecap="round"
+      />
+      <circle cx="36" cy="46" r="5" fill="#c6ff3d" />
+      <path d="M36 51v7" stroke="#c6ff3d" strokeWidth="4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function IconTrophy() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M7 4h10v2h3v3c0 2.2-1.6 4-3.7 4.4A5.5 5.5 0 0 1 12.5 16H13v2h3v2H8v-2h3v-2h.5A5.5 5.5 0 0 1 7.7 13.4C5.6 13 4 11.2 4 9V6h3V4zm0 4H6v1c0 1 .6 1.8 1.5 2.1V8zm11 0h-1v3.1c.9-.3 1.5-1.1 1.5-2.1V8h-1.5z"
+      />
+    </svg>
+  );
+}
+
 export function VibeIcon({ tone }: { tone: GameMode }) {
   if (tone === "classic") {
     return (

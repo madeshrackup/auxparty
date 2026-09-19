@@ -24,6 +24,7 @@ import {
   updatePasswordHash,
   updateProfile,
   uploadAvatarFile,
+  grantAchievement,
   type DbUser,
 } from "./db.ts";
 import { IS_PROD, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL } from "./env.ts";
@@ -177,6 +178,7 @@ export async function registerUser(username: string, email: string, password: st
       avatar_path: null,
     };
     await insertUser(user);
+    await grantAchievement(user.id, "welcome");
   }
 
   await sendChallenge(user);
@@ -214,6 +216,7 @@ export async function loginUser(username: string, password: string) {
     );
   }
   const sid = await createSession(user.id);
+  await grantAchievement(user.id, "welcome");
   return { user, sid };
 }
 

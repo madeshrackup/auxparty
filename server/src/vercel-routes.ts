@@ -17,7 +17,7 @@ import {
   authBody,
   verifyEmailToken,
 } from "./auth.ts";
-import { deleteSession, type DbUser } from "./db.ts";
+import { deleteSession, loadAchievements, type DbUser } from "./db.ts";
 import { searchItunes } from "./itunes.ts";
 
 function bodyOf(req: VercelRequest) {
@@ -87,6 +87,23 @@ export async function me(req: VercelRequest, res: VercelResponse) {
     res.status(200).json(authBody(user));
   } catch {
     res.status(200).json({ user: null });
+  }
+}
+
+export async function achievements(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET") {
+    res.status(405).json({ error: "Method not allowed." });
+    return;
+  }
+  try {
+    const user = await getAuthedUserFromSid(sidOf(req));
+    if (!user) {
+      res.status(200).json({ unlocked: [], wins: 0 });
+      return;
+    }
+    res.status(200).json(await loadAchievements(user.id));
+  } catch {
+    res.status(200).json({ unlocked: [], wins: 0 });
   }
 }
 
@@ -274,6 +291,7 @@ export async function musicSearch(req: VercelRequest, res: VercelResponse) {
 
 const AUTH_ACTIONS = {
   me,
+  achievements,
   register,
   login,
   verify,

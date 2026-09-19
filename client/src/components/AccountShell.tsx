@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { IconGlobe, IconPeople } from "./PartyArt";
+import { IconPeople } from "./PartyArt";
+import TrophyLink from "./TrophyLink";
 import UserMenu from "./UserMenu";
 import { useAuth } from "../useAuth";
 
@@ -15,9 +16,7 @@ export default function AccountShell({
   return (
     <div className="home">
       <header className="home-top">
-        <span className="lang-pill">
-          <IconGlobe /> EN
-        </span>
+        <TrophyLink />
         <Link to="/" className="brand">
           <span className="brand-mark" aria-hidden />
           <span className="brand-name">AUX PARTY</span>

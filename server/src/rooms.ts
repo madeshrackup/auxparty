@@ -18,6 +18,7 @@ import { MIN_PLAYERS } from "../../shared/types.ts";
 import { fetchChart, resolvePlaylist, uniqueTracks } from "./itunes.ts";
 import { matchesSong } from "./match.ts";
 import { isBuzzerChart } from "./seeds.ts";
+import { recordMatchWins } from "./db.ts";
 
 const MAX_PLAYERS = 10;
 const PREVIEW_MS = 30_000;
@@ -905,7 +906,13 @@ export class Room {
 
   private finishGame() {
     this.clearTimers();
+    const firstPodium = this.phase !== "podium";
     this.phase = "podium";
+    if (firstPodium) {
+      const best = Math.max(0, ...this.players.map((player) => player.score));
+      const winners = this.players.filter((player) => !player.isGuest && player.score === best).map((player) => player.id);
+      void recordMatchWins(winners).catch(() => {});
+    }
     this.emit();
   }
 

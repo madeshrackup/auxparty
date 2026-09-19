@@ -19,6 +19,7 @@ import {
   presenceFromRoom,
   requestFriend,
   requireFriends,
+  searchFriends,
   sendFriendMessage,
   unfriend,
   type Presence,
@@ -467,17 +468,30 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("social:add", async (payload: { username?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+  socket.on("social:search", async (payload: { query?: string }, ack?: (a: { ok: boolean; error?: string; people?: unknown }) => void) => {
     try {
       const userId = requireAccount();
-      const friend = await requestFriend(userId, String(payload?.username || ""));
-      await emitSocial(userId);
-      await emitSocial(friend.id);
-      ack?.({ ok: true });
+      const people = await searchFriends(userId, String(payload?.query || ""));
+      ack?.({ ok: true, people });
     } catch (err) {
       ackError(ack, err);
     }
   });
+
+  socket.on(
+    "social:add",
+    async (payload: { username?: string; message?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
+      try {
+        const userId = requireAccount();
+        const friend = await requestFriend(userId, String(payload?.username || ""), String(payload?.message || ""));
+        await emitSocial(userId);
+        await emitSocial(friend.id);
+        ack?.({ ok: true });
+      } catch (err) {
+        ackError(ack, err);
+      }
+    },
+  );
 
   socket.on("social:accept", async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
     try {

@@ -178,6 +178,30 @@ h2,
   width: fit-content;
 }
 
+.trophy-link {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  background: #7a1ea8;
+  color: var(--lime);
+  display: grid;
+  place-items: center;
+  text-decoration: none;
+  box-shadow: 0 4px 0 var(--stroke);
+  justify-self: start;
+}
+
+.trophy-link svg {
+  width: 22px;
+  height: 22px;
+}
+
+.trophy-link.on {
+  background: var(--lime);
+  color: #5a117c;
+}
+
 .mini-ico {
   width: 16px;
   height: 16px;
@@ -525,6 +549,46 @@ a.text-link {
   position: relative;
   flex: 1;
   min-height: 0;
+}
+
+.play-right {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+}
+
+.join-card-slim {
+  flex: 0 0 auto;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.join-card-slim .play-hero .lime-title {
+  font-size: 24px;
+  margin-bottom: 2px;
+}
+
+.join-card-slim .person-badge {
+  width: 52px;
+  height: 52px;
+}
+
+.join-slim-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.join-slim-row .code-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.join-slim-row .start-btn {
+  min-width: 108px;
+  padding: 8px 16px;
+  font-size: 22px;
 }
 
 .play-card {
@@ -1792,7 +1856,8 @@ a.btn {
   }
 
   .live-pill,
-  .lang-pill {
+  .lang-pill,
+  .trophy-link {
     justify-self: center;
   }
 
@@ -2007,6 +2072,13 @@ a.btn {
   grid-column: 1 / -1;
 }
 
+.play-right .friends-card {
+  flex: 1;
+  min-height: 220px;
+  width: 100%;
+  overflow: hidden;
+}
+
 .friends-card {
   width: min(720px, 100%);
   display: flex;
@@ -2016,6 +2088,155 @@ a.btn {
 
 .friends-card.compact {
   width: 100%;
+}
+
+.friends-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.friends-head .lime-title {
+  margin: 0;
+}
+
+.friends-locked {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 16px;
+  padding: 8px 10px 12px;
+  min-height: 0;
+}
+
+.friends-lock {
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 6px 0 rgba(90, 17, 124, 0.4));
+}
+
+.friends-locked-copy {
+  margin: 0;
+  max-width: 13em;
+  font-family: "Lilita One", "Fredoka", Impact, sans-serif;
+  font-size: 28px;
+  line-height: 1.15;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.friends-locked .start-btn {
+  font-size: 22px;
+  padding: 10px 22px;
+}
+
+.friends-card.compact .friends-lock {
+  width: 64px;
+  height: 64px;
+}
+
+.friends-card.compact .friends-locked-copy {
+  font-size: 20px;
+}
+
+.friend-plus {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  background: var(--lime);
+  color: #5a117c;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 3px 0 var(--stroke);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 2px;
+}
+
+.friend-plus.on {
+  background: #fff;
+}
+
+.friend-plus-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #ff5d7a;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border: 2px solid #fff;
+}
+
+.friend-sheet,
+.friend-add-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+}
+
+.friend-sheet-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.friend-sheet-tabs button {
+  flex: 1;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  background: rgba(90, 17, 124, 0.28);
+  color: inherit;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.friend-sheet-tabs button.on {
+  background: var(--lime);
+  color: #5a117c;
+  border-color: #fff;
+}
+
+.friend-request-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.friend-note {
+  resize: vertical;
+  min-height: 64px;
+  font-family: Fredoka, sans-serif;
+}
+
+.friend-req-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.friend-request-row {
+  align-items: flex-start;
 }
 
 .friend-add {
@@ -2034,6 +2255,12 @@ a.btn {
   gap: 8px;
   max-height: 280px;
   overflow: auto;
+}
+
+.play-right .friend-list,
+.play-right .friend-sheet {
+  flex: 1;
+  max-height: none;
 }
 
 .friend-row {
@@ -2141,4 +2368,150 @@ a.btn {
   margin: 0;
   font-weight: 700;
   color: var(--lime);
+}
+
+.achievements-card {
+  width: min(920px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 20px 22px 28px;
+}
+
+.achieve-top {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.achieve-top .lime-title {
+  margin: 0;
+  font-size: 34px;
+}
+
+.achieve-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.achieve-progress-track {
+  flex: 1;
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(8, 0, 36, 0.35);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  overflow: hidden;
+}
+
+.achieve-progress-track i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #ffe27a, var(--lime));
+}
+
+.achieve-close {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  border: 3px solid #fff;
+  background: #7a1ea8;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  text-decoration: none;
+  font-size: 28px;
+  line-height: 1;
+  box-shadow: 0 4px 0 var(--stroke);
+}
+
+.achieve-featured {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 18px;
+  align-items: center;
+}
+
+.achieve-name {
+  margin: 0 0 6px;
+  font-family: "Lilita One", "Fredoka", Impact, sans-serif;
+  font-size: 36px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: #cbb7d8;
+}
+
+.achieve-name.on {
+  background: linear-gradient(180deg, #fff4b0, #e0b125);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.achieve-section-title {
+  margin: 0 0 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #cbb7d8;
+}
+
+.achieve-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.trophy-badge {
+  position: relative;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.trophy-badge svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+.trophy-badge.locked .trophy-logo {
+  opacity: 0.45;
+  filter: grayscale(0.4);
+}
+
+.trophy-logo {
+  position: absolute;
+  width: 46%;
+  height: 32%;
+  margin: 0;
+  box-shadow: none;
+}
+
+@media (max-width: 860px) {
+  .achieve-top {
+    grid-template-columns: 1fr auto;
+  }
+
+  .achieve-progress {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+
+  .achieve-featured {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
 }

@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { PartyFx } from "./components/PartyArt";
+import AchievementsPage from "./pages/AchievementsPage";
 import ChangePasswordPage from "./pages/ChangePasswordPage";
 import FriendsPage from "./pages/FriendsPage";
 import Landing from "./pages/Landing";
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="/account" element={<ProfilePage />} />
         <Route path="/friends" element={<FriendsPage />} />
         <Route path="/account/stats" element={<StatsPage />} />
+        <Route path="/achievements" element={<AchievementsPage />} />
         <Route path="/account/password" element={<ChangePasswordPage />} />
         <Route path="/room/:code" element={<RoomPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

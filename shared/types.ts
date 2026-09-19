@@ -203,6 +203,14 @@ export type FriendRequest = {
   id: string;
   username: string;
   avatarUrl: string | null;
+  message?: string | null;
+};
+
+export type FriendSearchHit = {
+  id: string;
+  username: string;
+  avatarUrl: string | null;
+  status: "none" | "friends" | "outgoing" | "incoming";
 };
 
 export type FriendMessage = {
@@ -240,6 +248,7 @@ export type SocketAck = {
   ok: boolean;
   error?: string;
   code?: string;
+  people?: FriendSearchHit[];
 };
 
 export type LobbyPreview = {
@@ -248,4 +257,44 @@ export type LobbyPreview = {
   players: number;
   maxPlayers: number;
   mode: GameMode;
+};
+
+export type AchievementId = "welcome" | "maestro";
+export type AchievementSection = "general" | "challenges";
+
+export type AchievementDef = {
+  id: AchievementId;
+  name: string;
+  description: string;
+  section: AchievementSection;
+};
+
+export const ACHIEVEMENT_SECTIONS: { id: AchievementSection; title: string }[] = [
+  { id: "general", title: "General" },
+  { id: "challenges", title: "Challenges" },
+];
+
+export const ACHIEVEMENTS: AchievementDef[] = [
+  {
+    id: "welcome",
+    name: "Welcome",
+    description: "Register an Aux Party account and join the mix.",
+    section: "general",
+  },
+  {
+    id: "maestro",
+    name: "Maestro!",
+    description: "Win 100 games.",
+    section: "challenges",
+  },
+];
+
+export type AchievementUnlock = {
+  id: AchievementId;
+  unlockedAt: number;
+};
+
+export type AchievementsState = {
+  unlocked: AchievementUnlock[];
+  wins: number;
 };
