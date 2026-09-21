@@ -12,6 +12,7 @@ import {
   deleteAccount as deleteAccountApi,
 } from "./api";
 import { getGuestName, setGuestName as persistGuest } from "./identity";
+import { resetSocket } from "./socket";
 import { queuePendingAchievement } from "./components/AchievementToasts";
 import type { AuthUser } from "@shared/types";
 
