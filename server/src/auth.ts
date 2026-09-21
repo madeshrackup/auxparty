@@ -41,8 +41,11 @@ import {
   sendPasswordResetEmail,
   sendVerificationEmail,
 } from "./mail.ts";
-import { passwordIssues, usernameIssues } from "../../shared/credentials.ts";
+import * as credentialsNs from "../../shared/credentials.ts";
 import { assertUuid, sanitizeText, sniffImageMime } from "./security.ts";
+import { sharedModule } from "./shared-import.ts";
+
+const { passwordIssues, usernameIssues } = sharedModule(credentialsNs);
 
 export const COOKIE = "aux_sid";
 export const CSRF_COOKIE = "aux_csrf";
