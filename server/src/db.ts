@@ -1,13 +1,23 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import {
-  emptyPlayerStats,
-  GAME_MODE_ORDER,
-  type AchievementId,
-  type GameMode,
-  type PlayerStats,
-} from "../../shared/types.ts";
+import type { AchievementId, GameMode, PlayerStats } from "../../shared/types.ts";
 import { IS_PROD, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL } from "./env.ts";
 import { assertUuid, isUuid, sanitizeText } from "./security.ts";
+
+const GAME_MODE_ORDER: GameMode[] = ["classic", "buzzer", "impostor", "aux"];
+
+function emptyPlayerStats(): PlayerStats {
+  return {
+    wins: 0,
+    points: 0,
+    trophies: 0,
+    modes: {
+      classic: { wins: 0, points: 0 },
+      buzzer: { wins: 0, points: 0 },
+      impostor: { wins: 0, points: 0 },
+      aux: { wins: 0, points: 0 },
+    },
+  };
+}
 
 export type DbUser = {
   id: string;
