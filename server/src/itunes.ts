@@ -1,5 +1,7 @@
 import type { BuzzerChartId, Track } from "../../shared/types.ts";
 
+export type BuzzerItunesChartId = Exclude<BuzzerChartId, "custom">;
+
 type ItunesSong = {
   trackId?: number;
   trackName?: string;
@@ -21,7 +23,7 @@ type RssEntry = {
 const cache = new Map<string, { at: number; tracks: Track[] }>();
 const TTL = 1000 * 60 * 10;
 
-export const CHART_FEEDS: Record<BuzzerChartId, string> = {
+export const CHART_FEEDS: Record<BuzzerItunesChartId, string> = {
   top100: "https://itunes.apple.com/us/rss/topsongs/limit=100/json",
   pop: "https://itunes.apple.com/us/rss/topsongs/limit=100/genre=14/json",
   hiphop: "https://itunes.apple.com/us/rss/topsongs/limit=100/genre=18/json",
@@ -79,7 +81,7 @@ async function cached(key: string, load: () => Promise<Track[]>): Promise<Track[
 }
 
 export async function searchItunes(term: string, limit = 25): Promise<Track[]> {
-  const q = term.trim();
+  const q = term.trim().slice(0, 80);
   if (q.length < 2) return [];
   return cached(`search:${q.toLowerCase()}::${limit}`, async () => {
     const url = new URL("https://itunes.apple.com/search");
@@ -97,7 +99,7 @@ export async function searchItunes(term: string, limit = 25): Promise<Track[]> {
   });
 }
 
-export async function fetchChart(chart: BuzzerChartId): Promise<Track[]> {
+export async function fetchChart(chart: BuzzerItunesChartId): Promise<Track[]> {
   const feed = CHART_FEEDS[chart];
   return cached(`chart:${chart}`, async () => {
     const res = await fetch(feed, { headers: { Accept: "application/json" } });

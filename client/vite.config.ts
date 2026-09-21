@@ -9,7 +9,14 @@ export default defineConfig({
       "@shared": path.resolve(__dirname, "../shared"),
     },
   },
+  build: {
+    sourcemap: false,
+  },
   server: {
+    fs: {
+      strict: true,
+      deny: [".env", ".env.*", "**/.git/**"],
+    },
     port: 5173,
     proxy: {
       "/api": "http://localhost:3001",

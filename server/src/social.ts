@@ -107,14 +107,12 @@ export async function unfriend(userId: string, friendId: string) {
 }
 
 export async function sendFriendMessage(userId: string, toId: string, body: string) {
-  const text = body.trim().slice(0, 500);
-  if (text.length < 1) throw new Error("Type a message first.");
-  const saved = await insertFriendMessage(userId, toId, text);
+  const saved = await insertFriendMessage(userId, toId, body);
   return {
     id: saved.id,
     fromId: userId,
     toId,
-    body: text,
+    body: saved.body,
     createdAt: saved.createdAt,
   };
 }

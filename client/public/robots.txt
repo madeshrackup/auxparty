@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /account
+Disallow: /account/
+Disallow: /friends
+Disallow: /verify
+Disallow: /reset
+Disallow: /room/
+
+Sitemap: https://auxparty.co.uk/sitemap.xml

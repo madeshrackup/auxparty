@@ -13,7 +13,7 @@ export function UserBadge({
   const letter = (user.username.trim()[0] || "?").toUpperCase();
   return (
     <span className="user-badge" style={{ width: size, height: size, fontSize: size * 0.42 }}>
-      {user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : letter}
+      {user.avatarUrl ? <img src={user.avatarUrl} alt={`${user.username}'s photo`} decoding="async" /> : letter}
     </span>
   );
 }
@@ -56,6 +56,7 @@ export default function UserMenu() {
         className="user-menu-btn"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={`${user.username} account menu`}
         onClick={() => setOpen((v) => !v)}
       >
         <UserBadge user={user} />

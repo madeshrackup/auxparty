@@ -11,13 +11,16 @@ import {
 import { emitAck, getSocket, resetSocket } from "../socket";
 import { unlockAudio } from "../audio";
 import { ApiError, forgotPassword } from "../api";
+import PasswordField, { PasswordMeter } from "../components/PasswordField";
+import UsernameField, { type UsernameLiveStatus } from "../components/UsernameField";
+import { passwordIssues, passwordMeetsPolicy, usernameIssues } from "@shared/credentials";
 import { useAuth } from "../useAuth";
 import { getAvatar, nextAvatar, setAvatar, type AvatarId } from "../identity";
 import { runViewTransition } from "../transition";
 import FriendsPanel from "../components/FriendsPanel";
 import TrophyLink from "../components/TrophyLink";
 import UserMenu from "../components/UserMenu";
-import { MIN_PLAYERS, type GameMode } from "@shared/types";
+import { GAME_MODE_BLURBS, GAME_MODE_LABELS, GAME_MODE_ORDER, MIN_PLAYERS, type GameMode } from "@shared/types";
 
 const HOWTO = [
   {
@@ -27,48 +30,31 @@ const HOWTO = [
   },
   {
     step: "2. CLASSIC",
-    title: "Pick, then guess",
-    body: "Everyone has 30 seconds to pick a song. Then each pick plays and the room has 30 seconds to name it. Remaining seconds = your points. 2 players minimum.",
+    title: "Classic",
+    body: GAME_MODE_BLURBS.classic,
   },
   {
     step: "3. BUZZER BEATER",
-    title: "Fastest finger",
-    body: "A high-speed race to identify the song before anyone else beats you to the buzz. Hits charts by default, or paste a playlist. 2 players minimum.",
+    title: "Buzzer Beater",
+    body: GAME_MODE_BLURBS.buzzer,
   },
   {
     step: "4. WHO ADDED THIS?",
-    title: "Call out the culprit",
-    body: "Everyone sneaks in a song. Guess who added it — not the title. Right person scores 20 plus seconds left. 3 players minimum.",
+    title: "Who Added This?",
+    body: GAME_MODE_BLURBS.impostor,
   },
   {
     step: "5. PASS THE AUX",
-    title: "Earn the cord",
-    body: "One DJ sets the prompt each round. Everyone — including the DJ — picks a track and votes. 3 players minimum.",
+    title: "Pass the Aux",
+    body: GAME_MODE_BLURBS.aux,
   },
 ];
 
-const GAME_MODES: { id: GameMode; title: string; body: string }[] = [
-  {
-    id: "classic",
-    title: "Classic",
-    body: "Pick a song, then guess every clip. Seconds left on the clock are your points.",
-  },
-  {
-    id: "buzzer",
-    title: "Buzzer Beater",
-    body: "First to buzz types the title. Miss and you're out of that clip.",
-  },
-  {
-    id: "impostor",
-    title: "Who Added This?",
-    body: "Name the friend who snuck it in. Right guess = 20 points plus seconds left.",
-  },
-  {
-    id: "aux",
-    title: "Pass the Aux",
-    body: "Play to a theme, then vote on who actually earned the cord.",
-  },
-];
+const GAME_MODES: { id: GameMode; title: string; body: string }[] = GAME_MODE_ORDER.map((id) => ({
+  id,
+  title: GAME_MODE_LABELS[id],
+  body: GAME_MODE_BLURBS[id],
+}));
 
 const HOST_STEPS: { tone: GameMode; title: string; blurb: string }[] = [
   { tone: "classic", title: "Pick your game", blurb: "Hit CREATE, then lock in a mode for the night." },
@@ -93,7 +79,10 @@ export default function Landing() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [usernameStatus, setUsernameStatus] = useState<UsernameLiveStatus>("idle");
   const [authMode, setAuthMode] = useState<"login" | "register" | "forgot">("login");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [verifyBanner, setVerifyBanner] = useState("");
   const [forgotSent, setForgotSent] = useState(false);
 
@@ -106,6 +95,8 @@ export default function Landing() {
     tab === "auth" && auth.user ? auth.user.username.trim() : auth.guestName.trim();
   const ready = name.length >= 2;
   const asGuest = tab !== "auth" || !auth.user;
+  const usernameLooksReady =
+    usernameIssues(username).length === 0 && username.trim().length > 0 && usernameStatus === "free";
 
   function pickAvatar(dir: 1 | -1) {
     const next = nextAvatar(avatar, dir);
@@ -175,10 +166,18 @@ export default function Landing() {
     setError("");
     try {
       if (mode === "register") {
+        const nameProblems = usernameIssues(username);
+        if (nameProblems.length) throw new Error(nameProblems[0]);
+        if (usernameStatus === "taken") throw new Error("That username is taken.");
+        const pwProblems = passwordIssues(password);
+        if (pwProblems.length) throw new Error(pwProblems[0]);
         if (password !== confirmPassword) {
           throw new Error("Passwords don't match.");
         }
-        const res = await auth.register(username, email, password);
+        const res = await auth.register(username, email, password, {
+          acceptedTerms,
+          ageConfirmed,
+        });
         sessionStorage.setItem("aux_verify_banner", res.email);
         setVerifyBanner(res.email);
         setAuthMode("login");
@@ -255,6 +254,14 @@ export default function Landing() {
     setSearchParams({}, { replace: true });
   }, [location.search]);
 
+  useEffect(() => {
+    if (location.hash !== "#how-to-play") return;
+    goScreen("identity");
+    window.requestAnimationFrame(() => {
+      document.getElementById("how-to-play")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [location.hash]);
+
   return (
     <div className="home">
       {verifyBanner && (
@@ -284,7 +291,7 @@ export default function Landing() {
         <TrophyLink />
         <Link to="/" className="brand">
           <span className="brand-mark" aria-hidden />
-          <span className="brand-name">AUX PARTY</span>
+          <h1 className="brand-name">AUX PARTY</h1>
           <span className="brand-tag">THE MUSIC QUIZ</span>
         </Link>
         {screen !== "identity" && auth.user ? (
@@ -332,7 +339,7 @@ export default function Landing() {
                   <button type="button" className="arrow-btn" onClick={() => pickAvatar(-1)} aria-label="Previous character">
                     ‹
                   </button>
-                  <Avatar id={avatar} size={176} />
+                  <Avatar id={avatar} size={176} label="Selected character" />
                   <button type="button" className="arrow-btn" onClick={() => pickAvatar(1)} aria-label="Next character">
                     ›
                   </button>
@@ -350,6 +357,7 @@ export default function Landing() {
                       className="nick-input"
                       value={auth.guestName}
                       maxLength={20}
+                      aria-label="Nickname"
                       onChange={(e) => auth.setGuestName(e.target.value)}
                     />
                   )}
@@ -385,6 +393,7 @@ export default function Landing() {
                       type="email"
                       placeholder="Email"
                       autoComplete="email"
+                      aria-label="Email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                     />
@@ -418,14 +427,13 @@ export default function Landing() {
                 }}
               >
                 <p className="lime-title">
-                  {authMode === "register" ? "Create an account" : "Log in or create an account"}
+                  {authMode === "register" ? "Create an account" : "Log in"}
                 </p>
-                <input
-                  className="nick-input"
-                  placeholder="Username"
-                  autoComplete="username"
+                <UsernameField
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={setUsername}
+                  liveCheck={authMode === "register"}
+                  onLiveStatus={setUsernameStatus}
                 />
                 {authMode === "register" && (
                   <input
@@ -433,30 +441,58 @@ export default function Landing() {
                     type="email"
                     placeholder="Email"
                     autoComplete="email"
+                    aria-label="Email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                   />
                 )}
-                <input
-                  className="nick-input"
-                  type="password"
+                <PasswordField
                   placeholder="Password"
                   autoComplete={authMode === "register" ? "new-password" : "current-password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
+                {authMode === "register" && <PasswordMeter password={password} />}
                 {authMode === "register" && (
-                  <input
-                    className="nick-input"
-                    type="password"
+                  <PasswordField
                     placeholder="Confirm password"
                     autoComplete="new-password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                   />
                 )}
+                {authMode === "register" && confirmPassword.length > 0 && password !== confirmPassword && (
+                  <p className="field-note bad">Passwords don't match.</p>
+                )}
                 {authMode === "register" && (
-                  <p className="play-copy">Password needs at least 8 characters. We’ll email you a verify link.</p>
+                  <div className="consent-stack">
+                    <label className="consent-check">
+                      <input
+                        type="checkbox"
+                        checked={acceptedTerms}
+                        onChange={(e) => setAcceptedTerms(e.target.checked)}
+                      />
+                      <span>
+                        I agree to the{" "}
+                        <Link to="/terms" viewTransition>
+                          Terms of Service
+                        </Link>{" "}
+                        and{" "}
+                        <Link to="/privacy" viewTransition>
+                          Privacy Policy
+                        </Link>
+                        .
+                      </span>
+                    </label>
+                    <label className="consent-check">
+                      <input
+                        type="checkbox"
+                        checked={ageConfirmed}
+                        onChange={(e) => setAgeConfirmed(e.target.checked)}
+                      />
+                      <span>I confirm I am 13 years of age or older. Aux Party does not collect birthdays.</span>
+                    </label>
+                  </div>
                 )}
                 {authMode === "register" ? (
                   <div className="start-row">
@@ -464,10 +500,12 @@ export default function Landing() {
                       className="start-btn"
                       disabled={
                         busy ||
-                        !username.trim() ||
                         !email.trim() ||
-                        password.length < 8 ||
-                        password !== confirmPassword
+                        !usernameLooksReady ||
+                        !passwordMeetsPolicy(password) ||
+                        password !== confirmPassword ||
+                        !acceptedTerms ||
+                        !ageConfirmed
                       }
                       type="submit"
                     >
@@ -521,8 +559,8 @@ export default function Landing() {
             </div>
           </section>
 
-          <aside className="g-card howto-card">
-            <p className="lime-title">How to play</p>
+          <aside className="g-card howto-card" id="how-to-play">
+            <h2 className="lime-title">How to play</h2>
             <div className="howto-mid">
               <div className="howto-art" data-slide={slide}>
                 <Avatar id={AVATAR_IDS_FOR_SLIDE[slide]} size={72} />
@@ -532,7 +570,12 @@ export default function Landing() {
               <p>{how.body}</p>
             </div>
             <div className="howto-nav">
-              <button type="button" className="arrow-btn sm" onClick={() => setSlide((s) => (s + HOWTO.length - 1) % HOWTO.length)}>
+              <button
+                type="button"
+                className="arrow-btn sm"
+                onClick={() => setSlide((s) => (s + HOWTO.length - 1) % HOWTO.length)}
+                aria-label="Previous how to play slide"
+              >
                 ‹
               </button>
               <div className="dots">
@@ -546,7 +589,12 @@ export default function Landing() {
                   />
                 ))}
               </div>
-              <button type="button" className="arrow-btn sm" onClick={() => setSlide((s) => (s + 1) % HOWTO.length)}>
+              <button
+                type="button"
+                className="arrow-btn sm"
+                onClick={() => setSlide((s) => (s + 1) % HOWTO.length)}
+                aria-label="Next how to play slide"
+              >
                 ›
               </button>
             </div>

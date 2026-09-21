@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { MIN_PLAYERS, MAX_ROUNDS, MIN_ROUNDS, BUZZER_CHARTS, type GameMode, type RoomPopup, type RoomState, type SocketAck, type Track } from "@shared/types";
+import { MIN_PLAYERS, MAX_ROUNDS, MIN_ROUNDS, BUZZER_CHARTS, GAME_MODE_BLURBS, GAME_MODE_LABELS, type GameMode, type RoomPopup, type RoomState, type SocketAck, type Track } from "@shared/types";
 import Artwork from "../components/Artwork";
 import Dropdown from "../components/Dropdown";
 import Scoreboard from "../components/Scoreboard";
 import TimerBar from "../components/TimerBar";
 import TrackSearch from "../components/TrackSearch";
-import { playPreview, stopPreview, unlockAudio } from "../audio";
-import { emitAck, getSocket } from "../socket";
+import { pausePreview, playBuzz, playPreview, stopPreview, unlockAudio } from "../audio";
+import { emitAck, emitLeave, getSocket } from "../socket";
 import { useAuth } from "../useAuth";
 import UserMenu from "../components/UserMenu";
 import FriendsPanel from "../components/FriendsPanel";
@@ -27,22 +27,10 @@ function sceneOf(phase: RoomState["phase"]) {
 }
 
 const MODE_COPY: Record<GameMode, { title: string; body: string }> = {
-  classic: {
-    title: "Classic",
-    body: "Everyone has 30 seconds to pick a song. Then each clip plays and you race the clock — remaining seconds are your points.",
-  },
-  buzzer: {
-    title: "Buzzer Beater",
-    body: "Buzz in, then type the title before anyone else locks it. A miss only burns you for that clip.",
-  },
-  impostor: {
-    title: "Who Added This?",
-    body: "Everyone sneaks in a track. Guess who put it on — not the title. Correct answers score 20 plus however many seconds are left.",
-  },
-  aux: {
-    title: "Pass the Aux",
-    body: "One DJ sets the theme each round. Everyone — including the DJ — picks a track and votes.",
-  },
+  classic: { title: GAME_MODE_LABELS.classic, body: GAME_MODE_BLURBS.classic },
+  buzzer: { title: GAME_MODE_LABELS.buzzer, body: GAME_MODE_BLURBS.buzzer },
+  impostor: { title: GAME_MODE_LABELS.impostor, body: GAME_MODE_BLURBS.impostor },
+  aux: { title: GAME_MODE_LABELS.aux, body: GAME_MODE_BLURBS.aux },
 };
 
 export default function RoomPage() {
@@ -79,35 +67,42 @@ export default function RoomPage() {
     };
     sock.on("room:state", onState);
     let cancelled = false;
-    void (async () => {
-      try {
-        const res = await emitAck<SocketAck>(sock, "room:join", {
-          code: code.toUpperCase(),
-          name,
-          avatar: getAvatar(),
-        });
-        if (cancelled) return;
-        if (!res.ok) throw new Error(res.error || "Join failed.");
-      } catch (err) {
-        if (!cancelled) {
+    const joinRoom = () => {
+      void (async () => {
+        try {
+          const res = await emitAck<SocketAck>(sock, "room:join", {
+            code: code.toUpperCase(),
+            name,
+            avatar: getAvatar(),
+          });
+          if (cancelled) return;
+          if (!res.ok) throw new Error(res.error || "Join failed.");
+        } catch (err) {
+          if (cancelled || !joiningRef.current) return;
           setToast(err instanceof Error ? err.message : "Join failed.");
           setTimeout(() => navigate("/", { viewTransition: true }), 1400);
+        } finally {
+          if (!cancelled && joiningRef.current) {
+            joiningRef.current = false;
+            runViewTransition(() => setJoining(false));
+          }
         }
-      } finally {
-        if (!cancelled) {
-          joiningRef.current = false;
-          runViewTransition(() => setJoining(false));
-        }
-      }
-    })();
+      })();
+    };
+    sock.on("connect", joinRoom);
+    if (sock.connected) joinRoom();
     return () => {
       cancelled = true;
-      joiningRef.current = true;
-      sceneRef.current = null;
       sock.off("room:state", onState);
-      sock.emit("room:leave");
+      sock.off("connect", joinRoom);
     };
   }, [asGuest, auth.ready, code, name, navigate, photo, playToken]);
+
+  useEffect(() => {
+    return () => {
+      emitLeave();
+    };
+  }, [code]);
 
   useEffect(() => {
     if (!toast) return;
@@ -122,6 +117,7 @@ export default function RoomPage() {
         url: state.classic.track.previewUrl,
         startedAt: state.classic.playStartedAt,
         serverNow: state.serverNow,
+        paused: false,
       };
     }
     if (state.buzzer?.track && (state.phase === "buzzer_playing" || state.phase === "buzzer_buzzed")) {
@@ -129,6 +125,7 @@ export default function RoomPage() {
         url: state.buzzer.track.previewUrl,
         startedAt: state.buzzer.playStartedAt,
         serverNow: state.serverNow,
+        paused: state.phase === "buzzer_buzzed",
       };
     }
     if (state.impostor?.track && state.phase === "impostor_playing") {
@@ -136,12 +133,18 @@ export default function RoomPage() {
         url: state.impostor.track.previewUrl,
         startedAt: state.impostor.playStartedAt,
         serverNow: state.serverNow,
+        paused: false,
       };
     }
     if (state.phase === "aux_listen" && state.aux?.entries) {
       const entry = state.aux.entries[state.aux.listenIndex];
       if (entry) {
-        return { url: entry.track.previewUrl, startedAt: state.aux.listenStartedAt, serverNow: state.serverNow };
+        return {
+          url: entry.track.previewUrl,
+          startedAt: state.aux.listenStartedAt,
+          serverNow: state.serverNow,
+          paused: false,
+        };
       }
     }
     return null;
@@ -152,9 +155,15 @@ export default function RoomPage() {
       stopPreview();
       return;
     }
+    if (preview.paused) {
+      pausePreview();
+      return;
+    }
     playPreview(preview.url, preview.startedAt, preview.serverNow);
-    return () => stopPreview();
-  }, [preview?.url, preview?.startedAt]);
+    return () => pausePreview();
+  }, [preview?.url, preview?.startedAt, preview?.paused]);
+
+  useEffect(() => () => stopPreview(), []);
 
   useEffect(() => {
     if (!quitOpen) return;
@@ -177,7 +186,7 @@ export default function RoomPage() {
 
   function confirmQuit() {
     stopPreview();
-    getSocket(name, asGuest, photo, playToken).emit("room:leave");
+    emitLeave();
     setQuitOpen(false);
     navigate("/", { viewTransition: true });
   }
@@ -225,7 +234,7 @@ export default function RoomPage() {
           }}
         >
           <span className="brand-mark" aria-hidden />
-          <span className="brand-name">AUX PARTY</span>
+          <h1 className="brand-name">AUX PARTY</h1>
           <span className="brand-tag">ROOM {state.code}</span>
         </Link>
         {auth.user ? <UserMenu /> : <span className="you-chip">{auth.displayName}</span>}
@@ -257,11 +266,14 @@ export default function RoomPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="quit-title"
+            aria-describedby="quit-copy"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="kicker">Leave party</div>
             <h2 id="quit-title">Quit the game?</h2>
-            <p className="hint">Are you sure you want to exit and quit the game?</p>
+            <p className="hint" id="quit-copy">
+              Are you sure you want to exit and quit the game?
+            </p>
             <div className="row quit-actions">
               <button className="btn btn-ghost" type="button" onClick={() => setQuitOpen(false)}>
                 Stay
@@ -374,121 +386,169 @@ function Lobby({
   const connected = state.players.filter((p) => p.connected).length;
   const minPlayers = MIN_PLAYERS[state.mode];
   const canStart = connected >= minPlayers;
+  const [tab, setTab] = useState<"party" | "settings">("party");
   const [playlistUrl, setPlaylistUrl] = useState("");
+  const customMix = state.mode === "buzzer" && state.buzzerChart === "custom";
+
   return (
     <div className="grid-2 lobby-grid">
       <div className="panel">
-        <div className="kicker">Share this code</div>
-        <div className="room-code">{state.code}</div>
-        <p className="hint">Share this code so friends can drop in. The game mode is locked for this room.</p>
-        <div className="mode-lock">
-          <span className="kicker">Playing</span>
-          <strong>{MODE_COPY[state.mode].title}</strong>
-          <p>{MODE_COPY[state.mode].body}</p>
-          <p className="hint">{minPlayers} players minimum</p>
+        <div className="lobby-tabs">
+          <button
+            type="button"
+            className={`lobby-tab ${tab === "party" ? "on" : ""}`}
+            onClick={() => setTab("party")}
+          >
+            Party
+          </button>
+          <button
+            type="button"
+            className={`lobby-tab ${tab === "settings" ? "on" : ""}`}
+            onClick={() => setTab("settings")}
+          >
+            Game settings
+          </button>
         </div>
-        <label className={`privacy-check ${youHost ? "" : "locked"}`}>
-          <input
-            type="checkbox"
-            checked={state.isPrivate}
-            disabled={!youHost}
-            onChange={(event) => onSend("room:set-private", { isPrivate: event.target.checked })}
-          />
-          <span>
-            Private lobby
-            <span className="hint">
-              {state.isPrivate
-                ? "Friends need this code or an invite to join."
-                : "Friends can join this party from your friends list."}
-            </span>
-          </span>
-        </label>
-        {youHost ? (
-          <div className="row" style={{ marginTop: 16 }}>
-            <RoundsField
-              value={state.totalRounds}
-              onCommit={(total) => onSend("room:set-rounds", { total })}
-            />
-            <button
-              className="btn btn-primary"
-              type="button"
-              disabled={!canStart}
-              onClick={() => onSend("game:start")}
-            >
-              Start {MODE_COPY[state.mode].title}
-            </button>
-          </div>
-        ) : (
-          <p className="hint" style={{ marginTop: 16 }}>
-            This party is set to {state.totalRounds} {state.totalRounds === 1 ? "round" : "rounds"}.
-          </p>
-        )}
-        {youHost && !canStart && (
-          <p className="hint" style={{ marginTop: 10 }}>
-            Wait for {minPlayers - connected} more {minPlayers - connected === 1 ? "player" : "players"} to join.
-            This mode needs {minPlayers}.
-          </p>
-        )}
-        {state.mode === "buzzer" && (
-          <div style={{ marginTop: 24 }}>
-            <h2>The mix</h2>
-            <p className="hint">
-              Default is today's biggest hits. Pick another chart, or paste public Spotify / Apple Music playlist links.
-            </p>
-            <div className="field" style={{ marginTop: 12 }}>
-              <label>Chart</label>
+
+        {tab === "settings" ? (
+          <div className="lobby-settings">
+            <div className="kicker">Game settings</div>
+            <h2>Tune this party</h2>
+            <div className="field" style={{ marginTop: 16 }}>
+              <label>Lobby</label>
               <Dropdown
-                value={state.buzzerChart}
-                options={BUZZER_CHARTS.map((chart) => ({ value: chart.id, label: chart.label }))}
-                onChange={(chart) => youHost && onSend("room:set-chart", { chart })}
+                value={state.isPrivate ? "private" : "public"}
+                options={[
+                  { value: "private", label: "Private" },
+                  { value: "public", label: "Public" },
+                ]}
+                onChange={(value) => youHost && onSend("room:set-private", { isPrivate: value === "private" })}
                 disabled={!youHost}
               />
+              <p className="hint" style={{ marginTop: 8 }}>
+                {state.isPrivate
+                  ? "Friends need this code or an invite to join."
+                  : "Friends can join this party from your friends list."}
+              </p>
             </div>
-            {youHost && (
-              <form
-                className="row"
-                style={{ marginTop: 12 }}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const url = playlistUrl.trim();
-                  if (!url) return;
-                  onSend("room:add-playlist", { url }, 60000);
-                  setPlaylistUrl("");
-                }}
-              >
-                <div className="field" style={{ flex: 1 }}>
-                  <label>Playlist link</label>
-                  <input
-                    value={playlistUrl}
-                    placeholder="Spotify or Apple Music playlist URL"
-                    onChange={(e) => setPlaylistUrl(e.target.value)}
+            <div style={{ marginTop: 16 }}>
+              {youHost ? (
+                <RoundsField
+                  value={state.totalRounds}
+                  onCommit={(total) => onSend("room:set-rounds", { total })}
+                />
+              ) : (
+                <p className="hint">
+                  This party is set to {state.totalRounds} {state.totalRounds === 1 ? "round" : "rounds"}.
+                </p>
+              )}
+            </div>
+            {state.mode === "buzzer" && (
+              <div style={{ marginTop: 20 }}>
+                <div className="field">
+                  <label>Chart</label>
+                  <Dropdown
+                    value={state.buzzerChart}
+                    options={BUZZER_CHARTS.map((chart) => ({ value: chart.id, label: chart.label }))}
+                    onChange={(chart) => youHost && onSend("room:set-chart", { chart })}
+                    disabled={!youHost}
                   />
                 </div>
-                <button className="btn btn-gold" type="submit">
-                  Add
-                </button>
-              </form>
+                {customMix && (
+                  <>
+                    <p className="hint" style={{ marginTop: 10 }}>
+                      Paste public Spotify or Apple Music playlist links.
+                    </p>
+                    {youHost && (
+                      <form
+                        className="row"
+                        style={{ marginTop: 12 }}
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          const url = playlistUrl.trim();
+                          if (!url) return;
+                          onSend("room:add-playlist", { url }, 60000);
+                          setPlaylistUrl("");
+                        }}
+                      >
+                        <div className="field" style={{ flex: 1 }}>
+                          <label>Playlist link</label>
+                          <input
+                            value={playlistUrl}
+                            placeholder="Spotify or Apple Music playlist URL"
+                            onChange={(e) => setPlaylistUrl(e.target.value)}
+                          />
+                        </div>
+                        <button className="btn btn-gold" type="submit">
+                          Add
+                        </button>
+                      </form>
+                    )}
+                    <div className="queue" style={{ marginTop: 12 }}>
+                      {state.buzzerPlaylists.map((playlist) => (
+                        <div key={playlist.url} className="player">
+                          <span>
+                            {playlist.label}
+                            <span className="hint"> · {playlist.trackCount} tracks</span>
+                          </span>
+                          {youHost && (
+                            <button
+                              className="btn btn-ghost"
+                              type="button"
+                              onClick={() => onSend("room:remove-playlist", { url: playlist.url })}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
-            <div className="queue" style={{ marginTop: 12 }}>
-              {state.buzzerPlaylists.map((playlist) => (
-                <div key={playlist.url} className="player">
-                  <span>
-                    {playlist.label}
-                    <span className="hint"> · {playlist.trackCount} tracks</span>
-                  </span>
-                  {youHost && (
-                    <button
-                      className="btn btn-ghost"
-                      type="button"
-                      onClick={() => onSend("room:remove-playlist", { url: playlist.url })}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
           </div>
+        ) : (
+          <>
+            <div className="kicker">Share this code</div>
+            <div className="room-code">{state.code}</div>
+            <p className="hint">Share this code so friends can drop in. The game mode is locked for this room.</p>
+            <div className="mode-lock">
+              <span className="kicker">Playing</span>
+              <strong>{MODE_COPY[state.mode].title}</strong>
+              <p>{MODE_COPY[state.mode].body}</p>
+              <p className="hint">{minPlayers} players minimum</p>
+            </div>
+            <p className="hint">
+              {state.isPrivate ? "Private lobby" : "Public lobby"} · {state.totalRounds}{" "}
+              {state.totalRounds === 1 ? "round" : "rounds"}
+              {state.mode === "buzzer"
+                ? ` · ${BUZZER_CHARTS.find((chart) => chart.id === state.buzzerChart)?.label || "Chart"}`
+                : ""}
+            </p>
+            {youHost ? (
+              <div className="row" style={{ marginTop: 16 }}>
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  disabled={!canStart}
+                  onClick={() => onSend("game:start")}
+                >
+                  Start {MODE_COPY[state.mode].title}
+                </button>
+              </div>
+            ) : (
+              <p className="hint" style={{ marginTop: 16 }}>
+                Waiting for the host to start.
+              </p>
+            )}
+            {youHost && !canStart && (
+              <p className="hint" style={{ marginTop: 10 }}>
+                Wait for {minPlayers - connected} more {minPlayers - connected === 1 ? "player" : "players"} to join.
+                This mode needs {minPlayers}.
+              </p>
+            )}
+          </>
         )}
       </div>
       <div className="lobby-side">
@@ -621,17 +681,40 @@ function BuzzerView({
   onSend: (event: string, payload?: unknown) => void;
 }) {
   const [title, setTitle] = useState("");
+  const buzzedLocally = useRef(false);
   const buzzer = state.buzzer;
   const you = state.youId;
-  const buzzed = buzzer?.buzzedBy === you;
+  const answering = state.phase === "buzzer_buzzed";
+  const buzzed = answering && buzzer?.buzzedBy === you;
   const eliminated = buzzer?.eliminated.includes(you);
   const playing = state.phase === "buzzer_playing";
   const reveal = state.phase === "buzzer_reveal";
   const youHost = state.youId === state.hostId;
+  const buzzerName = state.players.find((p) => p.id === buzzer?.buzzedBy)?.name || "Someone";
+  const timerEndsAt = answering
+    ? buzzer?.buzzDeadline || state.timerEndsAt
+    : playing && buzzer?.playStartedAt
+      ? buzzer.playStartedAt + buzzer.previewMs
+      : state.timerEndsAt;
+  const timerDuration = answering
+    ? buzzer?.answerMs || 10000
+    : playing
+      ? buzzer?.previewMs || 30000
+      : state.timerDurationMs || 30000;
 
   useEffect(() => {
     setTitle("");
   }, [state.round, state.phase]);
+
+  useEffect(() => {
+    if (!answering) return;
+    if (buzzed && buzzedLocally.current) {
+      buzzedLocally.current = false;
+      return;
+    }
+    buzzedLocally.current = false;
+    playBuzz();
+  }, [answering, buzzed, buzzer?.buzzDeadline]);
 
   return (
     <div className="game-layout">
@@ -639,16 +722,8 @@ function BuzzerView({
         <div className="kicker">
           Buzzer Beater · Round {state.round}/{state.totalRounds}
         </div>
-        <Artwork
-          src={buzzer?.track?.artworkUrl}
-          spinning={playing || state.phase === "buzzer_buzzed"}
-          blurred={!reveal}
-        />
-        <TimerBar
-          endsAt={state.timerEndsAt}
-          duration={state.timerDurationMs || 30000}
-          serverNow={state.serverNow}
-        />
+        <Artwork src={buzzer?.track?.artworkUrl} spinning={playing} blurred={!reveal} />
+        <TimerBar endsAt={timerEndsAt} duration={timerDuration} serverNow={state.serverNow} />
         {reveal ? (
           <>
             <h2>
@@ -677,22 +752,24 @@ function BuzzerView({
             <button className="btn btn-gold" type="submit">
               Lock in
             </button>
-            {buzzer?.buzzDeadline && (
-              <p className="hint">Answer before the buzz clock runs out.</p>
-            )}
+            <p className="hint">Song paused. Type the title — you have 10 seconds.</p>
           </form>
         ) : (
           <>
             <p>
-              {buzzer?.buzzedBy
-                ? `${state.players.find((p) => p.id === buzzer.buzzedBy)?.name || "Someone"} has the aux.`
+              {answering
+                ? `${buzzerName} buzzed. Song paused.`
                 : "Hit buzz when you know it."}
             </p>
             <button
               className="btn btn-buzz"
               type="button"
               disabled={!playing || eliminated}
-              onClick={() => onSend("game:buzz")}
+              onClick={() => {
+                playBuzz();
+                buzzedLocally.current = true;
+                onSend("game:buzz");
+              }}
             >
               BUZZ
             </button>
@@ -756,22 +833,36 @@ function ImpostorView({
           <div className="kicker">
             Who Added This? · Round {state.round}/{state.totalRounds}
           </div>
-          <h2>That round's pile</h2>
-          <p className="hint">Now you can see who brought what. Next round, everyone sneaks in a new song.</p>
+          <h2>Who added what?</h2>
+          <p className="hint">Green means you nailed it. Red means you missed. Points just hit the scoreboard.</p>
           <TimerBar
             endsAt={state.timerEndsAt}
             duration={state.timerDurationMs || 12000}
             serverNow={state.serverNow}
           />
-          <div className="queue" style={{ width: "100%", textAlign: "left" }}>
-            {impostor?.recap?.map((entry) => (
-              <div key={entry.track.trackId} className="player">
-                <span>
-                  {entry.track.title} — {entry.track.artist}
-                </span>
-                <strong>{entry.submitterName}</strong>
-              </div>
-            ))}
+          <div className="impostor-recap-scroller">
+            {impostor?.recap?.map((entry, index) => {
+              const tone = entry.yours ? "yours" : entry.correct ? "ok" : "bad";
+              return (
+                <div key={`${entry.track.trackId}-${index}`} className={`impostor-recap-card ${tone}`}>
+                  <img src={entry.track.artworkUrl} alt={`${entry.track.title} by ${entry.track.artist}`} loading="lazy" decoding="async" />
+                  <strong className="impostor-recap-title">{entry.track.title}</strong>
+                  {entry.yours ? (
+                    <p className="impostor-recap-name">You</p>
+                  ) : entry.correct ? (
+                    <p className="impostor-recap-name">{entry.submitterName}</p>
+                  ) : (
+                    <>
+                      <p className="impostor-recap-wrong">
+                        <span aria-hidden>✕</span>
+                        {entry.guessedName || "No guess"}
+                      </p>
+                      <p className="impostor-recap-actual">{entry.submitterName}</p>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
           {youHost && (
             <button className="btn btn-primary" type="button" onClick={() => onSend("game:advance")}>
@@ -811,15 +902,7 @@ function ImpostorView({
               {impostor?.track?.title}
               <div className="hint">{impostor?.track?.artist}</div>
             </h2>
-            {impostor?.yourPoints != null ? (
-              <p className={`delta ${impostor.yourPoints > 0 ? "" : "down"}`}>
-                {impostor.yourPoints > 0 ? `Nice — +${impostor.yourPoints}` : "Wrong person · 0 points this clip"}
-              </p>
-            ) : isYourTrack ? (
-              <p>That was yours. The room is scoring guesses.</p>
-            ) : (
-              <p className="hint">No guess this clip.</p>
-            )}
+            <p className="hint">Guesses are locked. Who added it stays secret until the round reveal.</p>
             {youHost && (
               <button className="btn btn-primary" type="button" onClick={() => onSend("game:advance")}>
                 Next
@@ -970,28 +1053,36 @@ function AuxView({
   }
 
   if (state.phase === "aux_vote") {
+    const runoff = aux?.runoffIds;
+    const ballot = runoff?.length
+      ? aux?.entries?.filter((entry) => runoff.includes(entry.playerId))
+      : aux?.entries;
     return (
       <div className="game-layout">
         <div className="panel">
-          <h2>Who earned the aux?</h2>
-          <p className="hint">Everyone votes, including the DJ. You just can't vote for your own track. Theme: {aux?.theme}</p>
+          <h2>{runoff?.length ? "Tie-breaker" : "Who earned the aux?"}</h2>
+          <p className="hint">
+            {runoff?.length
+              ? `It's a draw. Vote again between the tied tracks. You still can't vote for yourself. Theme: ${aux?.theme}`
+              : `Everyone votes, including the DJ. You just can't vote for your own track. Theme: ${aux?.theme}`}
+          </p>
           <div className="vote-grid">
-            {aux?.entries?.map((entry) => (
+            {ballot?.map((entry) => (
               <button
                 key={entry.playerId}
                 type="button"
-                className={`vote-card ${aux.yourVote === entry.playerId ? "mine" : ""}`}
+                className={`vote-card ${aux?.yourVote === entry.playerId ? "mine" : ""}`}
                 disabled={entry.playerId === state.youId}
                 onClick={() => onSend("game:vote", { playerId: entry.playerId })}
               >
-                <img src={entry.track.artworkUrl} alt="" />
+                <img src={entry.track.artworkUrl} alt={`${entry.track.title} artwork`} loading="lazy" decoding="async" />
                 <strong>{entry.track.title}</strong>
                 <div className="hint">{entry.playerName}</div>
               </button>
             ))}
           </div>
           <p className="hint">
-            Votes in {aux?.votedCount}/{state.players.filter((p) => p.connected).length}
+            Votes in {aux?.votedCount ?? 0}/{aux?.voterTotal ?? 0}
           </p>
         </div>
         <Scoreboard players={state.players} youId={state.youId} deltas={state.lastDeltas} />
@@ -1004,8 +1095,16 @@ function AuxView({
     <div className="game-layout">
       <div className="panel stage">
         <div className="kicker">Aux awarded</div>
-        <h2>{winner?.name || "Someone"} keeps the cord</h2>
-        <p className="hint">{aux?.theme}</p>
+        <h2>
+          {aux?.uncontested
+            ? `${winner?.name || "Someone"} takes the aux uncontested`
+            : `${winner?.name || "Someone"} keeps the cord`}
+        </h2>
+        <p className="hint">
+          {aux?.uncontested
+            ? "Only one track was submitted, so they get the points and the aux."
+            : aux?.theme}
+        </p>
         <TimerBar
           endsAt={state.timerEndsAt}
           duration={state.timerDurationMs || 10000}
@@ -1016,11 +1115,17 @@ function AuxView({
             ?.slice()
             .sort((a, b) => b.votes - a.votes)
             .map((entry) => (
-              <div key={entry.playerId} className="vote-card">
-                <img src={entry.track.artworkUrl} alt="" />
+              <div
+                key={entry.playerId}
+                className={`vote-card ${entry.playerId === aux.winnerId ? "mine" : ""}`}
+              >
+                <img src={entry.track.artworkUrl} alt={`${entry.track.title} artwork`} loading="lazy" decoding="async" />
                 <strong>{entry.track.title}</strong>
                 <div className="hint">
-                  {entry.playerName} · {entry.votes} vote{entry.votes === 1 ? "" : "s"}
+                  {entry.playerName}
+                  {aux.uncontested
+                    ? " · uncontested"
+                    : ` · ${entry.votes} vote${entry.votes === 1 ? "" : "s"}`}
                 </div>
               </div>
             ))}

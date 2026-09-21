@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { ApiError } from "../api";
 import type { AuthState } from "../useAuth";
 
@@ -8,6 +9,8 @@ export default function AuthBar({ auth }: { auth: AuthState }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [pendingEmail, setPendingEmail] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -25,7 +28,9 @@ export default function AuthBar({ auth }: { auth: AuthState }) {
     try {
       if (open === "register") {
         if (password !== confirmPassword) throw new Error("Passwords don't match.");
-        const res = await auth.register(username, email, password);
+        if (!acceptedTerms) throw new Error("Accept the Terms of Service and Privacy Policy to create an account.");
+        if (!ageConfirmed) throw new Error("You must be 13 or older to create an Aux Party account.");
+        const res = await auth.register(username, email, password, { acceptedTerms, ageConfirmed });
         setPendingEmail(res.email);
         setPassword("");
         setConfirmPassword("");
@@ -151,9 +156,36 @@ export default function AuthBar({ auth }: { auth: AuthState }) {
                     />
                   </div>
                 )}
+                {open === "register" && (
+                  <div className="consent-stack" style={{ marginTop: 12 }}>
+                    <label className="consent-check">
+                      <input
+                        type="checkbox"
+                        checked={acceptedTerms}
+                        onChange={(e) => setAcceptedTerms(e.target.checked)}
+                      />
+                      <span>
+                        I agree to the <Link to="/terms">Terms of Service</Link> and{" "}
+                        <Link to="/privacy">Privacy Policy</Link>.
+                      </span>
+                    </label>
+                    <label className="consent-check">
+                      <input
+                        type="checkbox"
+                        checked={ageConfirmed}
+                        onChange={(e) => setAgeConfirmed(e.target.checked)}
+                      />
+                      <span>I confirm I am 13 years of age or older.</span>
+                    </label>
+                  </div>
+                )}
                 <p className="error">{auth.error}</p>
                 <div className="row">
-                  <button className="btn btn-primary" disabled={busy} type="submit">
+                  <button
+                    className="btn btn-primary"
+                    disabled={busy || (open === "register" && (!acceptedTerms || !ageConfirmed))}
+                    type="submit"
+                  >
                     {open === "register" ? "Sign up" : "Log in"}
                   </button>
                   <button className="btn btn-ghost" type="button" onClick={close}>

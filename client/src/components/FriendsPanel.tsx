@@ -84,10 +84,12 @@ export default function FriendsPanel({
   compact = false,
   canInvite = false,
   onRegister,
+  headingAs = "p",
 }: {
   compact?: boolean;
   canInvite?: boolean;
   onRegister?: () => void;
+  headingAs?: "h1" | "p";
 }) {
   const auth = useAuth();
   const navigate = useNavigate();
@@ -103,6 +105,7 @@ export default function FriendsPanel({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const Title = headingAs;
   const activeFriend = social.state.friends.find((f) => f.id === activeId) || null;
   const thread = activeId ? social.messages[activeId] || [] : [];
   const incoming = social.state.incoming;
@@ -139,7 +142,7 @@ export default function FriendsPanel({
     return (
       <section className={`g-card friends-card friends-card-locked ${compact ? "compact" : ""}`}>
         <div className="friends-head">
-          <p className="lime-title">Friends</p>
+          <Title className="lime-title">Friends</Title>
         </div>
         <div className="friends-locked">
           <IconLock />
@@ -201,7 +204,7 @@ export default function FriendsPanel({
   return (
     <section className={`g-card friends-card ${compact ? "compact" : ""}`}>
       <div className="friends-head">
-        <p className="lime-title">Friends</p>
+        <Title className="lime-title">Friends</Title>
         <button
           className={`friend-plus ${sheetOpen ? "on" : ""}`}
           type="button"

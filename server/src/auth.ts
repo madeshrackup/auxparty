@@ -2,21 +2,28 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import bcrypt from "bcryptjs";
 import type { Request, Response } from "express";
 import {
+  clearLoginLock,
   createPasswordChallenge,
   createSession,
+  deleteAccount,
   deleteEmailToken,
   deleteExpiredEmailTokens,
+  deletePasswordChallengesForUser,
   deletePasswordReset,
   deleteSession,
+  deleteSessionsForUser,
   findUserByEmail,
   findUserByEmailToken,
   findUserById,
   findUserByPasswordReset,
   findUserBySession,
   findUserByUsername,
+  getLoginLock,
   getVerifySentAt,
   insertUser,
+  logSecurityEvent,
   markEmailVerified,
+  recordFailedLogin,
   replaceEmailToken,
   replacePasswordReset,
   takePasswordChallenge,
@@ -27,14 +34,30 @@ import {
   grantAchievement,
   type DbUser,
 } from "./db.ts";
-import { IS_PROD, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL } from "./env.ts";
-import { sendPasswordCodeEmail, sendPasswordResetEmail, sendVerificationEmail } from "./mail.ts";
+import { IS_PROD, PLAY_TOKEN_SECRET, SUPABASE_URL } from "./env.ts";
+import {
+  sendAccountLockedEmail,
+  sendPasswordCodeEmail,
+  sendPasswordResetEmail,
+  sendVerificationEmail,
+} from "./mail.ts";
+import { passwordIssues, usernameIssues } from "../../shared/credentials.ts";
+import { assertUuid, sanitizeText, sniffImageMime } from "./security.ts";
 
 export const COOKIE = "aux_sid";
-const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
+export const CSRF_COOKIE = "aux_csrf";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 24;
+const RESET_TTL_MS = 1000 * 60 * 60;
+const CODE_TTL_MS = 1000 * 60 * 10;
 const RESEND_COOLDOWN_MS = 60_000;
+const FAIL_LIMIT = 8;
+const LOCK_MS = 30 * 60_000;
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("aux-party-timing-dummy", 10);
+const LOCKED_MESSAGE =
+  "This account is locked after too many failed sign-ins. Check your email for a link to set a new password.";
+
+export type AuthAudit = { ip?: string };
 
 export class AuthError extends Error {
   code: string;
@@ -54,13 +77,57 @@ export const cookieOptions = {
   path: "/",
 };
 
+export const cookieClearOptions = {
+  httpOnly: true,
+  sameSite: cookieOptions.sameSite,
+  secure: cookieOptions.secure,
+  path: "/",
+};
+
+export const csrfCookieOptions = {
+  httpOnly: false,
+  sameSite: cookieOptions.sameSite,
+  secure: cookieOptions.secure,
+  maxAge: cookieOptions.maxAge,
+  path: "/",
+};
+
+export function newCsrfToken() {
+  return randomBytes(32).toString("hex");
+}
+
+export function csrfFromCookies(cookies?: Record<string, string | undefined>) {
+  const raw = cookies?.[CSRF_COOKIE];
+  return typeof raw === "string" && raw.length >= 32 ? raw : "";
+}
+
+export function setCsrfCookie(res: Response, token: string) {
+  res.cookie(CSRF_COOKIE, token, csrfCookieOptions);
+}
+
+export function ensureCsrfCookie(req: { cookies?: Record<string, string | undefined> }, res: Response) {
+  const existing = csrfFromCookies(req.cookies);
+  if (existing) return existing;
+  const token = newCsrfToken();
+  setCsrfCookie(res, token);
+  return token;
+}
+
 export function publicAvatarUrl(path: string | null | undefined) {
   if (!path) return null;
-  return `${SUPABASE_URL}/storage/v1/object/public/avatars/${path}`;
+  const safe = path
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((part) => part && part !== "." && part !== "..")
+    .join("/");
+  if (!safe) return null;
+  return `${SUPABASE_URL}/storage/v1/object/public/avatars/${safe}`;
 }
 
 function playSecret() {
-  return SUPABASE_SERVICE_ROLE_KEY || "aux-play-dev";
+  if (PLAY_TOKEN_SECRET) return PLAY_TOKEN_SECRET;
+  if (IS_PROD) throw new Error("PLAY_TOKEN_SECRET or SUPABASE_SERVICE_ROLE_KEY is required.");
+  return "aux-play-dev";
 }
 
 export function playTokenFor(userId: string) {
@@ -144,22 +211,47 @@ async function sendChallenge(user: DbUser) {
   await touchVerifySent(user.id);
 }
 
-export async function registerUser(username: string, email: string, password: string) {
+function requirePassword(password: string) {
+  const issues = passwordIssues(password);
+  if (issues.length) throw new AuthError(issues[0]);
+}
+
+export async function usernameAvailability(username: string) {
+  const name = username.trim();
+  if (!name) return { available: false, errors: [] as string[] };
+  const errors = usernameIssues(name);
+  if (errors.length) return { available: false, errors };
+  const existing = await findUserByUsername(name);
+  return { available: !existing, errors: [] as string[] };
+}
+
+export async function registerUser(
+  username: string,
+  email: string,
+  password: string,
+  consents?: { acceptedTerms?: boolean; ageConfirmed?: boolean },
+) {
+  if (!consents?.acceptedTerms) {
+    throw new AuthError("Accept the Terms of Service and Privacy Policy to create an account.");
+  }
+  if (!consents?.ageConfirmed) {
+    throw new AuthError("You must be 13 or older to create an Aux Party account.");
+  }
   const name = username.trim();
   const mail = email.trim().toLowerCase();
-  if (!USERNAME_RE.test(name)) {
-    throw new AuthError("Username must be 3–20 letters, numbers, or underscores.");
+  const nameIssues = usernameIssues(name);
+  if (nameIssues.length) {
+    throw new AuthError(nameIssues[0]);
   }
   if (!EMAIL_RE.test(mail)) {
     throw new AuthError("Enter a valid email.");
   }
-  if (password.length < 8) {
-    throw new AuthError("Password must be at least 8 characters.");
-  }
+  requirePassword(password);
 
   const byEmail = await findUserByEmail(mail);
   if (byEmail?.email_verified) {
-    throw new AuthError("That email is already in use.");
+    await logSecurityEvent("register_existing_email");
+    return { email: mail };
   }
   const byName = await findUserByUsername(name);
   if (byName && byName.id !== byEmail?.id) {
@@ -203,9 +295,45 @@ export async function verifyEmailToken(rawToken: string) {
   return { user: { ...user, email_verified: 1 } };
 }
 
-export async function loginUser(username: string, password: string) {
+async function issuePasswordResetToken(user: DbUser) {
+  const raw = randomBytes(32).toString("hex");
+  await replacePasswordReset(user.id, hashToken(raw), Date.now() + RESET_TTL_MS);
+  return raw;
+}
+
+async function issueLockoutReset(user: DbUser) {
+  if (!user.email) return;
+  try {
+    const raw = await issuePasswordResetToken(user);
+    await sendAccountLockedEmail(user.email, raw);
+    await touchVerifySent(user.id);
+  } catch (err) {
+    console.warn("[security] lock email failed", err);
+  }
+}
+
+export async function loginUser(username: string, password: string, audit?: AuthAudit) {
   const user = await findUserByUsername(username.trim());
-  if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+  const ok = await bcrypt.compare(password, user?.password_hash || DUMMY_PASSWORD_HASH);
+  if (user) {
+    const lock = await getLoginLock(user.id);
+    if (lock.lockedUntil && lock.lockedUntil > Date.now()) {
+      await logSecurityEvent("login_blocked_locked", { userId: user.id, ip: audit?.ip });
+      throw new AuthError(LOCKED_MESSAGE, "locked");
+    }
+  }
+  if (!user || !ok) {
+    if (user) {
+      const lockedNow = await recordFailedLogin(user.id, FAIL_LIMIT, LOCK_MS);
+      if (lockedNow) {
+        await issueLockoutReset(user);
+        await logSecurityEvent("account_locked", { userId: user.id, ip: audit?.ip });
+        throw new AuthError(LOCKED_MESSAGE, "locked");
+      }
+      await logSecurityEvent("login_fail", { userId: user.id, ip: audit?.ip });
+    } else {
+      await logSecurityEvent("login_fail", { ip: audit?.ip, detail: "unknown_user" });
+    }
     throw new AuthError("Wrong username or password.");
   }
   if (!user.email_verified) {
@@ -215,8 +343,10 @@ export async function loginUser(username: string, password: string) {
       user.email || undefined,
     );
   }
+  await clearLoginLock(user.id);
   const sid = await createSession(user.id);
   await grantAchievement(user.id, "welcome");
+  await logSecurityEvent("login_ok", { userId: user.id, ip: audit?.ip });
   return { user, sid };
 }
 
@@ -226,56 +356,59 @@ export function setSessionCookie(res: Response, sid: string) {
 
 export async function clearSessionCookie(res: Response, sid?: string) {
   if (sid) await deleteSession(sid);
-  res.clearCookie(COOKIE, { path: "/" });
+  res.clearCookie(COOKIE, cookieClearOptions);
 }
 
-const RESET_TTL_MS = 1000 * 60 * 60;
-const CODE_TTL_MS = 1000 * 60 * 10;
-
-export async function requestPasswordReset(email: string) {
+export async function requestPasswordReset(email: string, audit?: AuthAudit) {
   const mail = email.trim().toLowerCase();
   if (!EMAIL_RE.test(mail)) throw new AuthError("Enter a valid email.");
   const user = await findUserByEmail(mail);
   if (!user?.email_verified || !user.email) return;
   const last = await getVerifySentAt(user.id);
   if (last && Date.now() - last < RESEND_COOLDOWN_MS) return;
-  const raw = randomBytes(32).toString("hex");
-  await replacePasswordReset(user.id, hashToken(raw), Date.now() + RESET_TTL_MS);
+  const raw = await issuePasswordResetToken(user);
   await sendPasswordResetEmail(user.email, raw);
   await touchVerifySent(user.id);
+  await logSecurityEvent("password_reset_requested", { userId: user.id, ip: audit?.ip });
 }
 
-export async function completePasswordReset(rawToken: string, password: string) {
-  if (password.length < 8) throw new AuthError("Password must be at least 8 characters.");
+export async function completePasswordReset(rawToken: string, password: string, audit?: AuthAudit) {
+  requirePassword(password);
   const hashed = hashToken(rawToken.trim());
   const user = await findUserByPasswordReset(hashed);
   if (!user) throw new AuthError("That reset link is invalid or expired.");
   await updatePasswordHash(user.id, await bcrypt.hash(password, 10));
   await deletePasswordReset(hashed);
+  await deletePasswordChallengesForUser(user.id);
+  await deleteSessionsForUser(user.id);
+  await clearLoginLock(user.id);
+  await logSecurityEvent("password_reset_completed", { userId: user.id, ip: audit?.ip });
 }
 
 export async function saveProfile(userId: string, aboutMe: string) {
-  const text = aboutMe.trim().slice(0, 280);
+  const text = sanitizeText(aboutMe, 280, true);
   const user = await updateProfile(userId, { about_me: text });
   if (!user) throw new AuthError("Could not save that profile.");
   return user;
 }
 
-export async function saveAvatar(userId: string, imageBase64: string, mime: string) {
-  const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-  if (!allowed.includes(mime)) throw new AuthError("Use a JPG, PNG, WEBP, or GIF.");
+export async function saveAvatar(userId: string, imageBase64: string, _mime = "image/jpeg") {
+  assertUuid(userId, "account");
   const raw = imageBase64.replace(/^data:[^;]+;base64,/, "");
+  if (raw.length > 2.8 * 1024 * 1024) throw new AuthError("Keep photos under 2MB.");
   const bytes = Buffer.from(raw, "base64");
   if (bytes.length < 32) throw new AuthError("That photo looks empty.");
   if (bytes.length > 2 * 1024 * 1024) throw new AuthError("Keep photos under 2MB.");
-  const path = await uploadAvatarFile(userId, bytes, mime);
+  const sniffed = sniffImageMime(bytes);
+  if (!sniffed) throw new AuthError("Use a JPG, PNG, WEBP, or GIF.");
+  const path = await uploadAvatarFile(userId, bytes, sniffed);
   const user = await updateProfile(userId, { avatar_path: path });
   if (!user) throw new AuthError("Could not save that photo.");
   return user;
 }
 
 export async function startPasswordChange(userId: string, oldPassword: string, newPassword: string) {
-  if (newPassword.length < 8) throw new AuthError("Password must be at least 8 characters.");
+  requirePassword(newPassword);
   const user = await findUserById(userId);
   if (!user || !(await bcrypt.compare(oldPassword, user.password_hash))) {
     throw new AuthError("Current password is wrong.");
@@ -297,10 +430,29 @@ export async function startPasswordChange(userId: string, oldPassword: string, n
   return { challengeId };
 }
 
-export async function confirmPasswordChange(userId: string, challengeId: string, code: string) {
+export async function confirmPasswordChange(
+  userId: string,
+  challengeId: string,
+  code: string,
+  audit?: AuthAudit,
+) {
   const digits = code.replace(/\D/g, "");
   if (digits.length !== 6) throw new AuthError("Enter the 6-digit code from your email.");
-  const row = await takePasswordChallenge(challengeId.trim(), userId, hashToken(digits));
+  const row = await takePasswordChallenge(assertUuid(challengeId, "challenge"), userId, hashToken(digits));
   if (!row) throw new AuthError("That code is wrong or expired.");
   await updatePasswordHash(row.userId, row.newPasswordHash);
+  await deleteSessionsForUser(row.userId);
+  await clearLoginLock(row.userId);
+  await logSecurityEvent("password_changed", { userId: row.userId, ip: audit?.ip });
+  const sid = await createSession(row.userId);
+  return { sid };
+}
+
+export async function deleteOwnAccount(userId: string, password: string, audit?: AuthAudit) {
+  const user = await findUserById(userId);
+  if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+    throw new AuthError("Wrong password.");
+  }
+  await logSecurityEvent("account_deleted", { userId, ip: audit?.ip });
+  await deleteAccount(userId);
 }

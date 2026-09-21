@@ -21,7 +21,7 @@ function PlayerFace({ player, size = 40 }: { player: Player; size?: number }) {
   if (player.avatarUrl) {
     return (
       <span className="player-photo" style={{ width: size, height: size }}>
-        <img src={player.avatarUrl} alt="" />
+        <img src={player.avatarUrl} alt={`${player.name}'s photo`} loading="lazy" decoding="async" />
       </span>
     );
   }

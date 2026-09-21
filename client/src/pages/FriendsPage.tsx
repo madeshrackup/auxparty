@@ -16,7 +16,7 @@ export default function FriendsPage() {
 
   return (
     <AccountShell showMenu>
-      <FriendsPanel />
+      <FriendsPanel headingAs="h1" />
       <p className="account-back">
         <Link to="/" className="text-link" viewTransition>
           ‹ Back to Aux Party

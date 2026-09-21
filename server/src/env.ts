@@ -37,3 +37,17 @@ export const APP_URL = (
 ).replace(/\/$/, "");
 export const EMAIL_FROM = process.env.EMAIL_FROM || "Aux Party <beth.t@example.com>";
 export const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+export const PLAY_TOKEN_SECRET = (process.env.PLAY_TOKEN_SECRET || SUPABASE_SERVICE_ROLE_KEY).trim();
+
+export function assertProductionEnv() {
+  if (!IS_PROD) return;
+  const missing: string[] = [];
+  if (!SUPABASE_URL.startsWith("https://")) missing.push("SUPABASE_URL");
+  if (!SUPABASE_SERVICE_ROLE_KEY) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  if (!RESEND_API_KEY) missing.push("RESEND_API_KEY");
+  if (!process.env.EMAIL_FROM) missing.push("EMAIL_FROM");
+  if (!APP_URL.startsWith("https://")) missing.push("APP_URL (https)");
+  if (missing.length) {
+    throw new Error(`Production env is incomplete: ${missing.join(", ")}`);
+  }
+}

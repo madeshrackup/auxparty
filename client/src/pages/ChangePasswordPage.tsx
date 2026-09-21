@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AccountShell from "../components/AccountShell";
+import PasswordField, { PasswordMeter } from "../components/PasswordField";
+import { passwordIssues, passwordMeetsPolicy } from "@shared/credentials";
 import { useAuth } from "../useAuth";
 
 export default function ChangePasswordPage() {
@@ -26,7 +28,8 @@ export default function ChangePasswordPage() {
     setError("");
     try {
       if (newPassword !== confirm) throw new Error("Passwords don't match.");
-      if (newPassword.length < 8) throw new Error("Password must be at least 8 characters.");
+      const problems = passwordIssues(newPassword);
+      if (problems.length) throw new Error(problems[0]);
       const res = await auth.startPasswordChange(oldPassword, newPassword);
       setChallengeId(res.challengeId);
     } catch (err) {
@@ -54,8 +57,8 @@ export default function ChangePasswordPage() {
       <section className="g-card account-card">
         {done ? (
           <>
-            <p className="lime-title">Password changed</p>
-            <p className="play-copy">You're still signed in. Use the new password next time you log in.</p>
+            <h1 className="lime-title">Password changed</h1>
+            <p className="play-copy">You're still signed in here. Other devices were signed out. Use the new password next time you log in.</p>
             <Link to="/account" className="start-btn" viewTransition>
               Back to profile
             </Link>
@@ -68,7 +71,7 @@ export default function ChangePasswordPage() {
               void confirmChange();
             }}
           >
-            <p className="lime-title">Enter your code</p>
+            <h1 className="lime-title">Enter your code</h1>
             <p className="play-copy">We emailed a 6-digit code to {auth.user.email}. It expires in 10 minutes.</p>
             <input
               className="nick-input"
@@ -92,34 +95,32 @@ export default function ChangePasswordPage() {
               void startChange();
             }}
           >
-            <p className="lime-title">Change password</p>
+            <h1 className="lime-title">Change password</h1>
             <p className="play-copy">We'll email a 6-digit code before the new password sticks.</p>
-            <input
-              className="nick-input"
-              type="password"
+            <PasswordField
               placeholder="Current password"
               autoComplete="current-password"
               value={oldPassword}
               onChange={(e) => setOldPassword(e.target.value)}
             />
-            <input
-              className="nick-input"
-              type="password"
+            <PasswordField
               placeholder="New password"
               autoComplete="new-password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
             />
-            <input
-              className="nick-input"
-              type="password"
+            <PasswordMeter password={newPassword} />
+            <PasswordField
               placeholder="Verify new password"
               autoComplete="new-password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
             />
+            {confirm.length > 0 && newPassword !== confirm && (
+              <p className="field-note bad">Passwords don't match.</p>
+            )}
             <p className="error">{error}</p>
-            <button className="start-btn" disabled={busy} type="submit">
+            <button className="start-btn" disabled={busy || !passwordMeetsPolicy(newPassword) || newPassword !== confirm} type="submit">
               Email me a code
             </button>
             <Link to="/account" className="text-link" viewTransition>

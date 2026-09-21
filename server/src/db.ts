@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL } from "./env.ts";
+import { emptyPlayerStats, GAME_MODE_ORDER, type GameMode, type PlayerStats } from "../../shared/types.ts";
+import { IS_PROD, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL } from "./env.ts";
+import { assertUuid, isUuid, sanitizeText } from "./security.ts";
 
 export type DbUser = {
   id: string;
@@ -61,7 +63,8 @@ function asUser(row: AccountRow): DbUser {
 }
 
 function dbError(error: { message?: string } | null, fallback: string) {
-  throw new Error(error?.message || fallback);
+  if (!IS_PROD && error?.message) throw new Error(error.message);
+  throw new Error(fallback);
 }
 
 async function accountQuery<T>(
@@ -112,8 +115,27 @@ export async function insertUser(user: DbUser): Promise<void> {
     password_hash: user.password_hash,
     about_me: user.about_me,
     avatar_path: user.avatar_path,
+    terms_accepted_at: new Date().toISOString(),
+    age_confirmed: true,
   };
   const { error } = await sb().from("accounts").insert(payload);
+  if (error && /terms_accepted_at|age_confirmed/.test(error.message || "")) {
+    const { terms_accepted_at: _t, age_confirmed: _a, ...rest } = payload as Record<string, unknown>;
+    const retry = await sb().from("accounts").insert(rest);
+    if (retry.error && useBaseAccountCols(retry.error)) {
+      const { error: baseErr } = await sb().from("accounts").insert({
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        email_verified: Boolean(user.email_verified),
+        password_hash: user.password_hash,
+      });
+      if (baseErr) dbError(baseErr, "Could not create that account.");
+      return;
+    }
+    if (retry.error) dbError(retry.error, "Could not create that account.");
+    return;
+  }
   if (error && useBaseAccountCols(error)) {
     const { error: retry } = await sb().from("accounts").insert({
       id: user.id,
@@ -153,6 +175,96 @@ export async function findUserBySession(sessionId: string): Promise<DbUser | und
 export async function deleteSession(sessionId: string): Promise<void> {
   const { error } = await sb().from("sessions").delete().eq("id", sessionId);
   if (error) dbError(error, "Could not sign out.");
+}
+
+export async function deleteSessionsForUser(userId: string): Promise<void> {
+  const { error } = await sb().from("sessions").delete().eq("user_id", assertUuid(userId, "account"));
+  if (error) dbError(error, "Could not end those sessions.");
+}
+
+let loginLockCols = true;
+let securityEventsEnabled = true;
+
+function disableLoginLock(error: { message?: string } | null) {
+  if (loginLockCols && error?.message && /failed_login_count|locked_until|last_failed_login_at/.test(error.message)) {
+    loginLockCols = false;
+    return true;
+  }
+  return false;
+}
+
+export async function getLoginLock(userId: string): Promise<{ count: number; lockedUntil: number | null }> {
+  if (!loginLockCols) return { count: 0, lockedUntil: null };
+  const { data, error } = await sb()
+    .from("accounts")
+    .select("failed_login_count, locked_until")
+    .eq("id", assertUuid(userId, "account"))
+    .maybeSingle();
+  if (error && disableLoginLock(error)) return { count: 0, lockedUntil: null };
+  if (error) dbError(error, "Could not check account lock.");
+  const row = data as { failed_login_count?: number | null; locked_until?: string | null } | null;
+  const lockedUntil = row?.locked_until ? Date.parse(row.locked_until) : NaN;
+  return {
+    count: Math.max(0, Number(row?.failed_login_count) || 0),
+    lockedUntil: Number.isFinite(lockedUntil) ? lockedUntil : null,
+  };
+}
+
+export async function recordFailedLogin(userId: string, limit = 8, lockMs = 30 * 60_000): Promise<boolean> {
+  if (!loginLockCols) return false;
+  const state = await getLoginLock(userId);
+  if (!loginLockCols) return false;
+  const now = Date.now();
+  const lockExpired = Boolean(state.lockedUntil && state.lockedUntil <= now);
+  const nextCount = lockExpired ? 1 : state.count + 1;
+  const lockNow = nextCount >= limit;
+  const { error } = await sb()
+    .from("accounts")
+    .update({
+      failed_login_count: nextCount,
+      last_failed_login_at: new Date(now).toISOString(),
+      locked_until: lockNow ? new Date(now + lockMs).toISOString() : null,
+    })
+    .eq("id", assertUuid(userId, "account"));
+  if (error && disableLoginLock(error)) return false;
+  if (error) dbError(error, "Could not record that sign-in attempt.");
+  return lockNow;
+}
+
+export async function clearLoginLock(userId: string): Promise<void> {
+  if (!loginLockCols) return;
+  const { error } = await sb()
+    .from("accounts")
+    .update({ failed_login_count: 0, locked_until: null })
+    .eq("id", assertUuid(userId, "account"));
+  if (error && disableLoginLock(error)) return;
+  if (error) dbError(error, "Could not clear account lock.");
+}
+
+export async function logSecurityEvent(
+  event: string,
+  opts?: { userId?: string; ip?: string; detail?: string },
+): Promise<void> {
+  const row = {
+    event: sanitizeText(event, 64),
+    user_id: opts?.userId && isUuid(opts.userId) ? opts.userId : null,
+    ip: opts?.ip ? sanitizeText(opts.ip, 64) : null,
+    detail: opts?.detail ? sanitizeText(opts.detail, 200) : null,
+  };
+  console.info(JSON.stringify({ src: "aux-security", at: new Date().toISOString(), ...row }));
+  if (!securityEventsEnabled || !row.event) return;
+  try {
+    const { error } = await sb().from("security_events").insert(row);
+    if (error) {
+      if (/security_events|schema cache|does not exist/i.test(error.message || "")) {
+        securityEventsEnabled = false;
+        return;
+      }
+      console.warn("[security] log failed", error.message);
+    }
+  } catch (err) {
+    console.warn("[security] log failed", err);
+  }
 }
 
 export async function markEmailVerified(userId: string): Promise<void> {
@@ -222,7 +334,11 @@ export async function updateProfile(
   userId: string,
   patch: { about_me?: string | null; avatar_path?: string | null },
 ): Promise<DbUser | undefined> {
-  const { error } = await sb().from("accounts").update(patch).eq("id", userId);
+  const next: { about_me?: string | null; avatar_path?: string | null } = {};
+  if (patch.about_me !== undefined) next.about_me = patch.about_me;
+  if (patch.avatar_path !== undefined) next.avatar_path = patch.avatar_path;
+  if (!Object.keys(next).length) return findUserById(userId);
+  const { error } = await sb().from("accounts").update(next).eq("id", userId);
   if (error) dbError(error, "Could not update that profile.");
   return findUserById(userId);
 }
@@ -262,6 +378,11 @@ export async function findUserByPasswordReset(tokenHash: string): Promise<DbUser
 export async function deletePasswordReset(tokenHash: string): Promise<void> {
   const { error } = await sb().from("password_resets").delete().eq("token_hash", tokenHash);
   if (error) dbError(error, "Could not consume that reset link.");
+}
+
+export async function deletePasswordChallengesForUser(userId: string): Promise<void> {
+  const { error } = await sb().from("password_challenges").delete().eq("user_id", assertUuid(userId, "account"));
+  if (error) dbError(error, "Could not clear password change codes.");
 }
 
 export async function createPasswordChallenge(
@@ -317,15 +438,28 @@ export async function ensureAvatarBucket(): Promise<void> {
 }
 
 export async function uploadAvatarFile(userId: string, bytes: Buffer, contentType: string): Promise<string> {
+  const owner = assertUuid(userId, "account");
   await ensureAvatarBucket();
   const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : contentType === "image/gif" ? "gif" : "jpg";
-  const path = `${userId}/avatar-${Date.now()}.${ext}`;
+  const path = `${owner}/avatar-${Date.now()}.${ext}`;
   const { error } = await sb().storage.from("avatars").upload(path, bytes, {
     contentType,
     upsert: true,
   });
   if (error) dbError(error, "Could not upload that photo.");
   return path;
+}
+
+export async function deleteAccount(userId: string): Promise<void> {
+  try {
+    const { data } = await sb().storage.from("avatars").list(userId);
+    const files = (data || []).map((file) => `${userId}/${file.name}`);
+    if (files.length) await sb().storage.from("avatars").remove(files);
+  } catch {
+    /* avatars bucket may be missing */
+  }
+  const { error } = await sb().from("accounts").delete().eq("id", userId);
+  if (error) dbError(error, "Could not delete that account.");
 }
 
 export type FriendAccount = {
@@ -404,7 +538,7 @@ export async function searchAccounts(
   userId: string,
   query: string,
 ): Promise<(FriendAccount & { status: "none" | "friends" | "outgoing" | "incoming" })[]> {
-  const q = query.trim().toLowerCase().replace(/[%_]/g, "");
+  const q = query.trim().toLowerCase().replace(/[%_\\]/g, "");
   if (q.length < 2) return [];
   const { data, error } = await sb()
     .from("accounts")
@@ -453,7 +587,7 @@ export async function createFriendRequest(
   if (!target) throw new Error("No account with that username.");
   if (target.id === fromId) throw new Error("You can't add yourself.");
   if (await areFriends(fromId, target.id)) throw new Error("You're already friends.");
-  const note = message.trim().slice(0, 200);
+  const note = sanitizeText(message, 200);
 
   const { data: reverse } = await sb()
     .from("friend_requests")
@@ -533,19 +667,22 @@ export async function removeFriend(userId: string, friendId: string): Promise<vo
 export async function insertFriendMessage(fromId: string, toId: string, body: string): Promise<{
   id: string;
   createdAt: number;
+  body: string;
 }> {
   if (!(await areFriends(fromId, toId))) throw new Error("You can only message friends.");
+  const text = sanitizeText(body, 500);
+  if (text.length < 1) throw new Error("Type a message first.");
   const id = crypto.randomUUID();
   const createdAt = Date.now();
   const { error } = await sb().from("friend_messages").insert({
     id,
     from_id: fromId,
     to_id: toId,
-    body,
+    body: text,
     created_at: new Date(createdAt).toISOString(),
   });
   if (error) socialError(error, "Could not send that message.");
-  return { id, createdAt };
+  return { id, createdAt, body: text };
 }
 
 export async function listFriendMessages(userId: string, otherId: string, limit = 50): Promise<{
@@ -556,22 +693,34 @@ export async function listFriendMessages(userId: string, otherId: string, limit 
   created_at: string;
 }[]> {
   if (!(await areFriends(userId, otherId))) throw new Error("You can only message friends.");
-  const { data, error } = await sb()
-    .from("friend_messages")
-    .select("id, from_id, to_id, body, created_at")
-    .or(
-      `and(from_id.eq.${userId},to_id.eq.${otherId}),and(from_id.eq.${otherId},to_id.eq.${userId})`,
-    )
-    .order("created_at", { ascending: false })
-    .limit(limit);
-  if (error) socialError(error, "Could not load messages.");
-  return ([...(data || [])] as {
+  const self = assertUuid(userId, "account");
+  const other = assertUuid(otherId, "player");
+  const [{ data: sent, error: sentErr }, { data: received, error: receivedErr }] = await Promise.all([
+    sb()
+      .from("friend_messages")
+      .select("id, from_id, to_id, body, created_at")
+      .eq("from_id", self)
+      .eq("to_id", other)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+    sb()
+      .from("friend_messages")
+      .select("id, from_id, to_id, body, created_at")
+      .eq("from_id", other)
+      .eq("to_id", self)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+  ]);
+  if (sentErr) socialError(sentErr, "Could not load messages.");
+  if (receivedErr) socialError(receivedErr, "Could not load messages.");
+  const rows = ([...(sent || []), ...(received || [])] as {
     id: string;
     from_id: string;
     to_id: string;
     body: string;
     created_at: string;
-  }[]).reverse();
+  }[]).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  return rows.slice(-limit);
 }
 
 export async function grantAchievement(userId: string, achievementId: string): Promise<void> {
@@ -599,6 +748,7 @@ export async function loadAchievements(userId: string): Promise<{
   let wins = 0;
   const winsRes = await sb().from("accounts").select("wins").eq("id", userId).maybeSingle();
   if (!winsRes.error) wins = Number((winsRes.data as { wins?: number } | null)?.wins || 0);
+  if (wins >= 1) await grantAchievement(userId, "first_of_many");
   if (wins >= 100) await grantAchievement(userId, "maestro");
 
   const { data, error } = await sb()
@@ -617,14 +767,85 @@ export async function loadAchievements(userId: string): Promise<{
   };
 }
 
-export async function recordMatchWins(userIds: string[]): Promise<void> {
-  const unique = [...new Set(userIds.filter(Boolean))];
-  for (const userId of unique) {
-    const current = await sb().from("accounts").select("wins").eq("id", userId).maybeSingle();
+function asInt(value: unknown) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function parseModeStats(raw: unknown): PlayerStats["modes"] {
+  const modes = emptyPlayerStats().modes;
+  if (!raw || typeof raw !== "object") return modes;
+  const bag = raw as Record<string, { wins?: unknown; points?: unknown }>;
+  for (const mode of GAME_MODE_ORDER) {
+    const row = bag[mode];
+    if (!row) continue;
+    modes[mode] = { wins: asInt(row.wins), points: asInt(row.points) };
+  }
+  return modes;
+}
+
+export async function loadStats(userId: string): Promise<PlayerStats> {
+  const stats = emptyPlayerStats();
+  const full = await sb()
+    .from("accounts")
+    .select("wins, points, mode_stats")
+    .eq("id", userId)
+    .maybeSingle();
+  if (full.error && /points|mode_stats/.test(full.error.message || "")) {
+    const slim = await sb().from("accounts").select("wins").eq("id", userId).maybeSingle();
+    if (!slim.error) stats.wins = asInt((slim.data as { wins?: number } | null)?.wins);
+  } else if (!full.error) {
+    const row = full.data as { wins?: number; points?: number; mode_stats?: unknown } | null;
+    stats.wins = asInt(row?.wins);
+    stats.points = asInt(row?.points);
+    stats.modes = parseModeStats(row?.mode_stats);
+  }
+
+  const { data, error } = await sb().from("achievements").select("achievement_id").eq("user_id", userId);
+  if (!error) stats.trophies = (data || []).length;
+  return stats;
+}
+
+export async function recordMatchStats(
+  mode: GameMode,
+  entries: { userId: string; score: number; won: boolean }[],
+): Promise<void> {
+  const unique = new Map<string, { userId: string; score: number; won: boolean }>();
+  for (const entry of entries) {
+    if (entry.userId) unique.set(entry.userId, entry);
+  }
+  for (const entry of unique.values()) {
+    const current = await sb()
+      .from("accounts")
+      .select("wins, points, mode_stats")
+      .eq("id", entry.userId)
+      .maybeSingle();
+    if (current.error && /points|mode_stats/.test(current.error.message || "")) {
+      if (entry.won) {
+        const slim = await sb().from("accounts").select("wins").eq("id", entry.userId).maybeSingle();
+        if (slim.error) continue;
+        const wins = asInt((slim.data as { wins?: number } | null)?.wins) + 1;
+        const { error } = await sb().from("accounts").update({ wins }).eq("id", entry.userId);
+        if (!error && wins >= 100) await grantAchievement(entry.userId, "maestro");
+        if (!error && wins === 1) await grantAchievement(entry.userId, "first_of_many");
+      }
+      continue;
+    }
     if (current.error) continue;
-    const wins = Number((current.data as { wins?: number } | null)?.wins || 0) + 1;
-    const { error } = await sb().from("accounts").update({ wins }).eq("id", userId);
+    const row = current.data as { wins?: number; points?: number; mode_stats?: unknown } | null;
+    const wins = asInt(row?.wins) + (entry.won ? 1 : 0);
+    const points = asInt(row?.points) + entry.score;
+    const modes = parseModeStats(row?.mode_stats);
+    modes[mode] = {
+      wins: modes[mode].wins + (entry.won ? 1 : 0),
+      points: modes[mode].points + entry.score,
+    };
+    const { error } = await sb()
+      .from("accounts")
+      .update({ wins, points, mode_stats: modes })
+      .eq("id", entry.userId);
     if (error) continue;
-    if (wins >= 100) await grantAchievement(userId, "maestro");
+    if (entry.won && wins === 1) await grantAchievement(entry.userId, "first_of_many");
+    if (wins >= 100) await grantAchievement(entry.userId, "maestro");
   }
 }

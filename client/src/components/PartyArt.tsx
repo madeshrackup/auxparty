@@ -86,6 +86,37 @@ export function IconSearch() {
   );
 }
 
+export function IconEye() {
+  return (
+    <svg viewBox="0 0 24 24" className="secret-ico" aria-hidden>
+      <path
+        d="M2.5 12S6.2 5.5 12 5.5 21.5 12 21.5 12 17.8 18.5 12 18.5 2.5 12 2.5 12Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="2.2" />
+    </svg>
+  );
+}
+
+export function IconEyeOff() {
+  return (
+    <svg viewBox="0 0 24 24" className="secret-ico" aria-hidden>
+      <path
+        d="M2.5 12S6.2 5.5 12 5.5 21.5 12 21.5 12 17.8 18.5 12 18.5 2.5 12 2.5 12Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="2.2" />
+      <path d="M4 20 20 4" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function IconLock() {
   return (
     <svg className="friends-lock" viewBox="0 0 72 72" aria-hidden>

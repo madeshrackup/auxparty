@@ -63,6 +63,14 @@ export default function Dropdown<T extends string | number>({
         const next = i < 0 ? 0 : (i + dir + options.length) % options.length;
         return next;
       });
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      if (!open) setOpen(true);
+      setActive(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      if (!open) setOpen(true);
+      setActive(options.length - 1);
     } else if (event.key === "Enter" || event.key === " ") {
       if (open && active >= 0 && options[active]) {
         event.preventDefault();
@@ -80,6 +88,7 @@ export default function Dropdown<T extends string | number>({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
+        aria-label={placeholder}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={onTriggerKey}
       >

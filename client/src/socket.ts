@@ -2,13 +2,45 @@ import { io, type Socket } from "socket.io-client";
 import { SOCKET_URL } from "./config";
 import { getAvatar, getGuestId } from "./identity";
 
-let socket: Socket | null = null;
+type SocketAuth = {
+  guestId: string;
+  name: string;
+  avatar: string;
+  forceGuest: boolean;
+  avatarUrl?: string;
+  playToken?: string;
+};
 
-const CONNECT_MS = 8000;
+let socket: Socket | null = null;
+let watchingVisibility = false;
+
+const CONNECT_MS = 12000;
+
+function identityKey(auth: SocketAuth) {
+  return JSON.stringify({
+    guestId: auth.guestId,
+    forceGuest: auth.forceGuest,
+    playToken: auth.playToken || "",
+  });
+}
+
+function watchTab() {
+  if (watchingVisibility) return;
+  watchingVisibility = true;
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && socket && !socket.connected) {
+      socket.connect();
+    }
+  });
+}
 
 export function resetSocket() {
   socket?.disconnect();
   socket = null;
+}
+
+export function emitLeave() {
+  socket?.emit("room:leave");
 }
 
 export function getSocket(
@@ -17,7 +49,7 @@ export function getSocket(
   avatarUrl?: string | null,
   playToken?: string | null,
 ): Socket {
-  const auth = {
+  const auth: SocketAuth = {
     guestId: getGuestId(),
     name,
     avatar: getAvatar(),
@@ -30,17 +62,23 @@ export function getSocket(
       withCredentials: true,
       auth,
       timeout: CONNECT_MS,
-      reconnectionAttempts: 4,
-      reconnectionDelay: 400,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 8000,
     });
+    watchTab();
     return socket;
   }
-  const changed = JSON.stringify(socket.auth) !== JSON.stringify(auth);
+  const prev = socket.auth as SocketAuth;
+  const identityChanged = identityKey(prev) !== identityKey(auth);
   socket.auth = auth;
-  if (changed && socket.connected) {
+  if (identityChanged && socket.connected) {
     socket.disconnect().connect();
   } else if (!socket.connected) {
     socket.connect();
+  } else if (prev.name !== auth.name) {
+    socket.emit("identity:update", { name: auth.name });
   }
   return socket;
 }

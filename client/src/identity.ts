@@ -43,6 +43,12 @@ export function setAvatar(id: AvatarId) {
   localStorage.setItem(AVATAR_KEY, id);
 }
 
+export function clearGuestData() {
+  localStorage.removeItem(GUEST_ID);
+  localStorage.removeItem(GUEST_NAME);
+  localStorage.removeItem(AVATAR_KEY);
+}
+
 export function nextAvatar(id: AvatarId, dir: 1 | -1): AvatarId {
   const i = AVATAR_IDS.indexOf(id);
   const next = (i + dir + AVATAR_IDS.length) % AVATAR_IDS.length;

@@ -57,7 +57,12 @@ export default function TrackSearch({ onPick, placeholder, disabled }: Props) {
               setTracks([]);
             }}
           >
-            <img src={track.artworkUrl} alt="" />
+            <img
+              src={track.artworkUrl.startsWith("https://") ? track.artworkUrl : undefined}
+              alt={`${track.title} by ${track.artist}`}
+              loading="lazy"
+              decoding="async"
+            />
             <span>
               <strong>{track.title}</strong>
               <div className="hint" style={{ margin: 0 }}>

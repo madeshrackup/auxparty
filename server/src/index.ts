@@ -3,11 +3,19 @@ import http from "node:http";
 import { parse as parseCookie } from "cookie";
 import { Server } from "socket.io";
 import { app } from "./app.ts";
-import { findUserBySession } from "./db.ts";
-import { APP_URL, SUPABASE_URL } from "./env.ts";
+import { findUserById, findUserBySession } from "./db.ts";
+import { assertProductionEnv, SUPABASE_URL } from "./env.ts";
 import { publicAvatarUrl, userIdFromPlayToken } from "./auth.ts";
 import { RoomManager } from "./rooms.ts";
 import { isBuzzerChart } from "./seeds.ts";
+import {
+  corsOriginOption,
+  guestPlayerId,
+  sanitizeAvatar,
+  sanitizeName,
+  sanitizeTrack,
+  assertUuid,
+} from "./security.ts";
 import {
   acceptFriend,
   addInvite,
@@ -27,7 +35,6 @@ import {
 import type { BuzzerChartId, GameMode, ImpostorGuess, LobbyPreview, Track } from "../../shared/types.ts";
 
 const PORT = Number(process.env.PORT) || 3001;
-const ORIGIN = process.env.CORS_ORIGIN || APP_URL || "http://localhost:5173";
 
 const GAME_MODES: GameMode[] = ["classic", "buzzer", "impostor", "aux"];
 
@@ -37,7 +44,10 @@ function isGameMode(value: unknown): value is GameMode {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: ORIGIN, credentials: true },
+  cors: { origin: corsOriginOption(), credentials: true },
+  pingInterval: 25000,
+  pingTimeout: 60000,
+  connectTimeout: 20000,
 });
 
 const rooms = new RoomManager();
@@ -50,8 +60,7 @@ app.get("/api/rooms", (_req, res) => {
 type Identity = { id: string; name: string; isGuest: boolean; avatar: string; avatarUrl: string | null };
 
 function avatarFromAuth(auth: Record<string, unknown>) {
-  const raw = String(auth.avatar || "disco");
-  return raw.slice(0, 16) || "disco";
+  return sanitizeAvatar(auth.avatar);
 }
 
 function photoFromAuth(auth: Record<string, unknown>, dbPath?: string | null) {
@@ -64,11 +73,11 @@ function photoFromAuth(auth: Record<string, unknown>, dbPath?: string | null) {
 
 function guestIdentity(auth: Record<string, unknown>): Identity {
   return {
-    id: String(auth.guestId || crypto.randomUUID()),
-    name: String(auth.name || "Guest").trim().slice(0, 20) || "Guest",
+    id: guestPlayerId(auth.guestId),
+    name: sanitizeName(String(auth.name || "Guest")),
     isGuest: true,
     avatar: avatarFromAuth(auth),
-    avatarUrl: photoFromAuth(auth),
+    avatarUrl: null,
   };
 }
 
@@ -96,19 +105,26 @@ async function identityFromHandshake(socket: {
   if (!auth.forceGuest) {
     const tokenId = userIdFromPlayToken(auth.playToken);
     if (tokenId) {
-      return {
-        id: tokenId,
-        name: String(auth.name || "").trim().slice(0, 20) || "Player",
-        isGuest: false,
-        avatar,
-        avatarUrl: photoFromAuth(auth),
-      };
+      try {
+        const user = await withTimeout(findUserById(tokenId), 5000);
+        if (user?.email_verified) {
+          return {
+            id: user.id,
+            name: user.username,
+            isGuest: false,
+            avatar,
+            avatarUrl: photoFromAuth(auth, user.avatar_path),
+          };
+        }
+      } catch {
+        /* fall through */
+      }
     }
     const raw = socket.handshake.headers.cookie;
     const sid = raw ? parseCookie(raw).aux_sid : undefined;
     if (sid) {
       try {
-        const user = await withTimeout(findUserBySession(sid), 2500);
+        const user = await withTimeout(findUserBySession(sid), 5000);
         if (user?.email_verified) {
           return {
             id: user.id,
@@ -175,7 +191,7 @@ async function pushSocialToFriends(userId: string) {
 
 io.use(async (socket, next) => {
   try {
-    socket.data.identity = await withTimeout(identityFromHandshake(socket), 3000);
+    socket.data.identity = await withTimeout(identityFromHandshake(socket), 8000);
   } catch {
     socket.data.identity = guestIdentity(socket.handshake.auth);
   }
@@ -187,11 +203,19 @@ io.on("connection", (socket) => {
   socketsByPlayer.set(identity.id, socket.id);
   socket.data.playerId = identity.id;
   socket.data.roomCode = "";
+  const seated = rooms.findSeat(identity.id);
+  if (seated && seated.reconnect(identity)) {
+    attachRoom(seated);
+    socket.data.roomCode = seated.code;
+    socket.join(seated.code);
+    broadcast(seated.code);
+    void pushSocialToFriends(identity.id);
+  }
 
   socket.on("identity:update", (payload: { name?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
     try {
       if (payload?.name) {
-        identity = { ...identity, name: payload.name.trim().slice(0, 20) || identity.name };
+        identity = { ...identity, name: sanitizeName(payload.name) };
       }
       socketsByPlayer.set(identity.id, socket.id);
       const code = socket.data.roomCode as string;
@@ -213,9 +237,9 @@ io.on("connection", (socket) => {
     async (payload: { name?: string; avatar?: string; mode?: GameMode; isPrivate?: boolean }, ack?: (a: { ok: boolean; error?: string; code?: string }) => void) => {
       try {
         if (payload?.name) {
-          identity = { ...identity, name: payload.name.trim().slice(0, 20) || identity.name };
+          identity = { ...identity, name: sanitizeName(payload.name) };
         }
-        if (payload?.avatar) identity = { ...identity, avatar: payload.avatar.slice(0, 16) };
+        if (payload?.avatar) identity = { ...identity, avatar: sanitizeAvatar(payload.avatar) };
         socketsByPlayer.set(identity.id, socket.id);
         const mode = isGameMode(payload?.mode) ? payload.mode : undefined;
         const isPrivate = payload?.isPrivate !== false;
@@ -240,9 +264,9 @@ io.on("connection", (socket) => {
     ) => {
       try {
         if (payload?.name) {
-          identity = { ...identity, name: payload.name.trim().slice(0, 20) || identity.name };
+          identity = { ...identity, name: sanitizeName(payload.name) };
         }
-        if (payload?.avatar) identity = { ...identity, avatar: payload.avatar.slice(0, 16) };
+        if (payload?.avatar) identity = { ...identity, avatar: sanitizeAvatar(payload.avatar) };
         socketsByPlayer.set(identity.id, socket.id);
         const code = String(payload?.code || "").trim().toUpperCase();
         const room = rooms.get(code);
@@ -385,8 +409,9 @@ io.on("connection", (socket) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new Error("You're not in a room.");
-      if (!payload?.track) throw new Error("Pick a track.");
-      room.submitTrack(identity.id, payload.track);
+      const track = sanitizeTrack(payload?.track);
+      if (!track) throw new Error("Pick a real song from search.");
+      room.submitTrack(identity.id, track);
       ack?.({ ok: true });
     } catch (err) {
       ackError(ack, err);
@@ -455,7 +480,7 @@ io.on("connection", (socket) => {
 
   const requireAccount = () => {
     if (identity.isGuest) throw new Error("Log in to use friends.");
-    return identity.id;
+    return assertUuid(identity.id, "account");
   };
 
   socket.on("social:sync", async (_p, ack?: (a: { ok: boolean; error?: string }) => void) => {
@@ -496,9 +521,10 @@ io.on("connection", (socket) => {
   socket.on("social:accept", async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
     try {
       const userId = requireAccount();
-      await acceptFriend(userId, String(payload?.userId || ""));
+      const otherId = assertUuid(payload?.userId, "player");
+      await acceptFriend(userId, otherId);
       await emitSocial(userId);
-      await emitSocial(String(payload?.userId || ""));
+      await emitSocial(otherId);
       ack?.({ ok: true });
     } catch (err) {
       ackError(ack, err);
@@ -508,9 +534,10 @@ io.on("connection", (socket) => {
   socket.on("social:decline", async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
     try {
       const userId = requireAccount();
-      await declineFriend(userId, String(payload?.userId || ""));
+      const otherId = assertUuid(payload?.userId, "player");
+      await declineFriend(userId, otherId);
       await emitSocial(userId);
-      await emitSocial(String(payload?.userId || ""));
+      await emitSocial(otherId);
       ack?.({ ok: true });
     } catch (err) {
       ackError(ack, err);
@@ -520,7 +547,7 @@ io.on("connection", (socket) => {
   socket.on("social:remove", async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
     try {
       const userId = requireAccount();
-      const other = String(payload?.userId || "");
+      const other = assertUuid(payload?.userId, "player");
       await unfriend(userId, other);
       await emitSocial(userId);
       await emitSocial(other);
@@ -535,7 +562,7 @@ io.on("connection", (socket) => {
     async (payload: { userId?: string; body?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
       try {
         const userId = requireAccount();
-        const toId = String(payload?.userId || "");
+        const toId = assertUuid(payload?.userId, "player");
         const message = await sendFriendMessage(userId, toId, String(payload?.body || ""));
         const sid = socketsByPlayer.get(toId);
         if (sid) io.to(sid).emit("social:message", message);
@@ -552,7 +579,7 @@ io.on("connection", (socket) => {
     async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string; messages?: unknown }) => void) => {
       try {
         const userId = requireAccount();
-        const messages = await loadFriendMessages(userId, String(payload?.userId || ""));
+        const messages = await loadFriendMessages(userId, assertUuid(payload?.userId, "player"));
         ack?.({ ok: true, messages });
       } catch (err) {
         ackError(ack, err);
@@ -563,7 +590,7 @@ io.on("connection", (socket) => {
   socket.on("social:invite", async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string }) => void) => {
     try {
       const userId = requireAccount();
-      const toId = String(payload?.userId || "");
+      const toId = assertUuid(payload?.userId, "player");
       await requireFriends(userId, toId);
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new Error("Start or join a room first.");
@@ -586,7 +613,7 @@ io.on("connection", (socket) => {
     async (payload: { userId?: string }, ack?: (a: { ok: boolean; error?: string; code?: string }) => void) => {
       try {
         const userId = requireAccount();
-        const friendId = String(payload?.userId || "");
+        const friendId = assertUuid(payload?.userId, "player");
         await requireFriends(userId, friendId);
         const room = rooms.findByPlayer(friendId);
         if (!room) throw new Error("They're not in a party right now.");
@@ -608,18 +635,15 @@ io.on("connection", (socket) => {
   );
 
   socket.on("disconnect", () => {
+    if (socketsByPlayer.get(identity.id) !== socket.id) return;
+    socketsByPlayer.delete(identity.id);
     const code = socket.data.roomCode as string;
-    if (socketsByPlayer.get(identity.id) === socket.id) {
-      socketsByPlayer.delete(identity.id);
-    }
-    if (code) {
-      rooms.get(code)?.leave(identity.id);
-      broadcast(code);
-    }
+    if (code) rooms.get(code)?.drop(identity.id);
     void pushSocialToFriends(identity.id);
   });
 });
 
+assertProductionEnv();
 server.listen(PORT, () => {
   console.log(`Aux Party API on http://localhost:${PORT}`);
 });

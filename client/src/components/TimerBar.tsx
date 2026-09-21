@@ -16,11 +16,7 @@ export default function TimerBar({
       setRemaining(0);
       return;
     }
-    const started = Date.now();
-    const tick = () => {
-      const elapsed = Date.now() - started;
-      setRemaining(Math.max(0, totalMs - elapsed));
-    };
+    const tick = () => setRemaining(Math.max(0, endsAt - Date.now()));
     tick();
     const id = window.setInterval(tick, 250);
     return () => window.clearInterval(id);

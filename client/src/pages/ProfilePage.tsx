@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AccountShell from "../components/AccountShell";
+import PasswordField from "../components/PasswordField";
 import { UserBadge } from "../components/UserMenu";
 import { useAuth } from "../useAuth";
+import { PRIVACY_EMAIL } from "../legalContent";
 
 export default function ProfilePage() {
   const auth = useAuth();
@@ -11,6 +13,8 @@ export default function ProfilePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState("");
 
   useEffect(() => {
     if (auth.ready && !auth.user) navigate("/", { replace: true });
@@ -52,10 +56,28 @@ export default function ProfilePage() {
     }
   }
 
+  async function removeAccount() {
+    if (deleteConfirm.trim() !== "DELETE") {
+      setError("Type DELETE to confirm.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setSaved("");
+    try {
+      await auth.deleteAccount(deletePassword);
+      navigate("/", { replace: true, viewTransition: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete that account.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <AccountShell showMenu>
       <section className="g-card account-card">
-        <p className="lime-title">Profile</p>
+        <h1 className="lime-title">Profile</h1>
         <div className="profile-photo">
           <UserBadge user={auth.user} size={96} />
           <label className="start-btn alt photo-btn">
@@ -87,6 +109,35 @@ export default function ProfilePage() {
         <Link to="/account/password" className="text-link" viewTransition>
           Change password
         </Link>
+        <div className="danger-zone">
+          <p className="kicker">Delete account</p>
+          <p className="play-copy">
+            This wipes your username, email, photo, friends, trophies, and stats. You can also email{" "}
+            <a href={`mailto:${PRIVACY_EMAIL}`}>{PRIVACY_EMAIL}</a>.
+          </p>
+          <PasswordField
+            placeholder="Current password"
+            autoComplete="current-password"
+            value={deletePassword}
+            onChange={(e) => setDeletePassword(e.target.value)}
+            aria-label="Password to delete account"
+          />
+          <input
+            className="nick-input"
+            value={deleteConfirm}
+            onChange={(e) => setDeleteConfirm(e.target.value)}
+            placeholder='Type DELETE'
+            aria-label="Type DELETE to confirm account deletion"
+          />
+          <button
+            className="start-btn alt danger-btn"
+            type="button"
+            disabled={busy || !deletePassword || deleteConfirm.trim() !== "DELETE"}
+            onClick={() => void removeAccount()}
+          >
+            Delete my account
+          </button>
+        </div>
         <p className="error">{error}</p>
         {saved && <p className="ok-note">{saved}</p>}
       </section>

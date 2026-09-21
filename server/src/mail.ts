@@ -3,6 +3,16 @@ import { APP_URL, EMAIL_FROM, IS_PROD, RESEND_API_KEY } from "./env.ts";
 
 const resend = () => (RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null);
 
+function throwMailError(error: { message?: string } | null, fallback: string): never {
+  const message = error?.message || fallback;
+  if (/domain is not verified/i.test(message)) {
+    throw new Error(
+      `${message} Local EMAIL_FROM is ${EMAIL_FROM}. The from-domain must exactly match a domain verified on this Resend API key.`,
+    );
+  }
+  throw new Error(message);
+}
+
 export async function sendVerificationEmail(to: string, token: string) {
   const verifyUrl = `${APP_URL}/verify?token=${encodeURIComponent(token)}`;
   const html = verificationHtml(verifyUrl, APP_URL);
@@ -30,7 +40,7 @@ export async function sendVerificationEmail(to: string, token: string) {
     html,
     text,
   });
-  if (error) throw new Error(error.message || "Could not send the verification email.");
+  if (error) throwMailError(error, "Could not send the verification email.");
 }
 
 async function deliver(to: string, subject: string, html: string, text: string, previewUrl?: string) {
@@ -40,7 +50,7 @@ async function deliver(to: string, subject: string, html: string, text: string, 
     return;
   }
   const { error } = await resend()!.emails.send({ from: EMAIL_FROM, to, subject, html, text });
-  if (error) throw new Error(error.message || "Could not send that email.");
+  if (error) throwMailError(error, "Could not send that email.");
 }
 
 export async function sendPasswordResetEmail(to: string, token: string) {
@@ -64,6 +74,29 @@ export async function sendPasswordResetEmail(to: string, token: string) {
     "If you didn't ask to reset your password, you can ignore this.",
   ].join("\n");
   await deliver(to, "Reset your Aux Party password", html, text, resetUrl);
+}
+
+export async function sendAccountLockedEmail(to: string, token: string) {
+  const resetUrl = `${APP_URL}/reset?token=${encodeURIComponent(token)}`;
+  const html = partyMailHtml({
+    kicker: "SECURITY",
+    title: "Your account is locked",
+    body: "We locked this Aux Party account after too many failed sign-ins. Choose a new password with the button below to unlock it and sign in again. This link expires in 1 hour.",
+    cta: "Choose a new password",
+    href: resetUrl,
+    footer: "If this wasn’t you, set a new password now and ignore any later sign-in attempts.",
+  });
+  const text = [
+    "AUX PARTY — THE MUSIC QUIZ",
+    "",
+    "Your account is locked",
+    "Too many failed sign-ins. Use this link to choose a new password and unlock your account. This link expires in 1 hour.",
+    "",
+    resetUrl,
+    "",
+    "If this wasn't you, set a new password now and ignore any later sign-in attempts.",
+  ].join("\n");
+  await deliver(to, "Your Aux Party account is locked", html, text, resetUrl);
 }
 
 export async function sendPasswordCodeEmail(to: string, code: string) {

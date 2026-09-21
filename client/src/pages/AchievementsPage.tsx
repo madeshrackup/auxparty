@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ACHIEVEMENTS, ACHIEVEMENT_SECTIONS, type AchievementId } from "@shared/types";
 import { getAchievements } from "../api";
 import AccountShell from "../components/AccountShell";
+import { IconLock } from "../components/PartyArt";
 import TrophyBadge from "../components/TrophyBadge";
+import { resetSocket } from "../socket";
 import { useAuth } from "../useAuth";
 
 export default function AchievementsPage() {
   const auth = useAuth();
+  const navigate = useNavigate();
   const [picked, setPicked] = useState<AchievementId>("welcome");
   const [unlockedIds, setUnlockedIds] = useState<Set<AchievementId>>(new Set());
   const [wins, setWins] = useState(0);
@@ -33,18 +36,47 @@ export default function AchievementsPage() {
   const selected = ACHIEVEMENTS.find((item) => item.id === picked) || ACHIEVEMENTS[0];
   const unlocked = unlockedIds.has(selected.id);
   const earned = ACHIEVEMENTS.filter((item) => unlockedIds.has(item.id)).length;
-  const description = useMemo(() => {
+  const how = useMemo(() => {
     if (selected.id === "maestro" && !unlocked) {
-      return `${selected.description} ${Math.min(wins, 100)}/100.`;
+      return `${selected.how} ${Math.min(wins, 100)}/100.`;
     }
-    return selected.description;
+    return selected.how;
   }, [selected, unlocked, wins]);
+
+  if (!auth.user) {
+    return (
+      <AccountShell>
+        <section className="g-card achievements-card achievements-card-locked">
+          <div className="achieve-top">
+            <h1 className="lime-title">Aux Party Badges</h1>
+            <Link to="/" className="achieve-close" viewTransition aria-label="Close badges">
+              ×
+            </Link>
+          </div>
+          <div className="friends-locked">
+            <IconLock />
+            <p className="friends-locked-copy">Only registered users have access to trophies!</p>
+            <button
+              className="start-btn alt"
+              type="button"
+              onClick={() => {
+                resetSocket();
+                navigate("/?signup=1");
+              }}
+            >
+              Register
+            </button>
+          </div>
+        </section>
+      </AccountShell>
+    );
+  }
 
   return (
     <AccountShell showMenu>
       <section className="g-card achievements-card">
         <div className="achieve-top">
-          <p className="lime-title">Achievements</p>
+          <h1 className="lime-title">Aux Party Badges</h1>
           <div className="achieve-progress">
             <span>Progress</span>
             <div className="achieve-progress-track">
@@ -54,7 +86,7 @@ export default function AchievementsPage() {
               {earned}/{ACHIEVEMENTS.length}
             </b>
           </div>
-          <Link to="/" className="achieve-close" viewTransition aria-label="Close achievements">
+          <Link to="/" className="achieve-close" viewTransition aria-label="Close badges">
             ×
           </Link>
         </div>
@@ -63,10 +95,8 @@ export default function AchievementsPage() {
           <TrophyBadge id={selected.id} name={selected.name} unlocked={unlocked} selected size={118} />
           <div>
             <p className={`achieve-name ${unlocked ? "on" : ""}`}>{selected.name}</p>
-            <p className="play-copy">{description}</p>
-            {!auth.user && selected.id === "welcome" && (
-              <p className="hint">Register to earn this trophy.</p>
-            )}
+            <p className="play-copy">{selected.description}</p>
+            <p className="achieve-how">{how}</p>
           </div>
         </div>
 

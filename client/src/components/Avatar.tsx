@@ -12,9 +12,11 @@ const PALETTE: Record<AvatarId, { skin: string; accent: string; ear: string }> =
 export default function Avatar({
   id,
   size = 160,
+  label,
 }: {
   id?: string;
   size?: number;
+  label?: string;
 }) {
   const key = (id && id in PALETTE ? id : "disco") as AvatarId;
   const c = PALETTE[key];
@@ -24,7 +26,9 @@ export default function Avatar({
       width={size}
       height={size}
       viewBox="0 0 120 120"
-      aria-hidden
+      role={label ? "img" : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
     >
       <circle cx="60" cy="64" r="40" fill={c.skin} />
       <ellipse cx="28" cy="52" rx="12" ry="16" fill={c.ear} />

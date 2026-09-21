@@ -9,6 +9,7 @@ import {
   saveAvatar as saveAvatarApi,
   saveProfile as saveProfileApi,
   startPasswordChange as startPasswordApi,
+  deleteAccount as deleteAccountApi,
 } from "./api";
 import { getGuestName, setGuestName as persistGuest } from "./identity";
 import { resetSocket } from "./socket";
@@ -24,13 +25,19 @@ type AuthState = {
   setError: (message: string) => void;
   setUser: (user: AuthUser | null) => void;
   setGuestName: (name: string) => void;
-  register: (username: string, email: string, password: string) => Promise<{ pending: boolean; email: string }>;
+  register: (
+    username: string,
+    email: string,
+    password: string,
+    consents: { acceptedTerms: boolean; ageConfirmed: boolean },
+  ) => Promise<{ pending: boolean; email: string }>;
   login: (username: string, password: string) => Promise<AuthUser>;
   resendVerification: (email: string) => Promise<void>;
   saveProfile: (aboutMe: string) => Promise<AuthUser>;
   saveAvatar: (image: string, mime: string) => Promise<AuthUser>;
   startPasswordChange: (oldPassword: string, newPassword: string) => Promise<{ challengeId: string }>;
   confirmPasswordChange: (challengeId: string, code: string) => Promise<void>;
+  deleteAccount: (password: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -70,8 +77,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         persistGuest(name);
         setGuest(name);
       },
-      async register(username: string, email: string, password: string) {
-        const r = await registerApi(username, email, password);
+      async register(
+        username: string,
+        email: string,
+        password: string,
+        consents: { acceptedTerms: boolean; ageConfirmed: boolean },
+      ) {
+        const r = await registerApi(username, email, password, consents);
         resetSocket();
         setError("");
         return r;
@@ -104,6 +116,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async confirmPasswordChange(challengeId: string, code: string) {
         await confirmPasswordApi(challengeId, code);
+      },
+      async deleteAccount(password: string) {
+        await deleteAccountApi(password);
+        resetSocket();
+        setUser(null);
+        setPlayToken(null);
       },
       async logout() {
         await logoutApi();

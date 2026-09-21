@@ -18,18 +18,20 @@ import {
   MAX_ROUNDS,
   MIN_PLAYERS,
   MIN_ROUNDS,
+  type AchievementId,
 } from "../../shared/types.ts";
 import { fetchChart, resolvePlaylist, uniqueTracks } from "./itunes.ts";
 import { matchesSong } from "./match.ts";
 import { isBuzzerChart } from "./seeds.ts";
-import { recordMatchWins } from "./db.ts";
+import { grantAchievement, listFriendIds, recordMatchStats } from "./db.ts";
+import { sanitizeText, sanitizeTrack } from "./security.ts";
 
 const MAX_PLAYERS = 10;
 const PREVIEW_MS = 30_000;
 const SUBMIT_MS = 30_000;
 const MISS_SUBMIT_PENALTY = -15;
 const MISS_SUBMIT_POPUP = "-15pts penalty for not submitting a song";
-const BUZZ_MS = 12_000;
+const BUZZ_MS = 10_000;
 const REVEAL_MS = 10_000;
 const CLIP_RESULT_MS = 4_000;
 const RECAP_MS = 12_000;
@@ -65,6 +67,12 @@ export function makeRoomCode(taken: Set<string>): string {
 }
 
 type ImpostorSub = { playerId: string; track: Track };
+type ImpostorGuessState = { submitterId: string; remainingSec: number };
+type ImpostorClipLog = {
+  playerId: string;
+  track: Track;
+  guesses: Map<string, ImpostorGuessState>;
+};
 type AuxSub = { playerId: string; track: Track };
 
 type Identity = {
@@ -108,8 +116,10 @@ export class Room {
   private impostorSubs = new Map<string, Track>();
   private impostorOrder: ImpostorSub[] = [];
   private impostorIndex = 0;
-  private impostorGuesses = new Map<string, ImpostorGuess>();
+  private impostorGuesses = new Map<string, ImpostorGuessState>();
   private impostorPoints = new Map<string, number>();
+  private impostorPending = new Map<string, number>();
+  private impostorClipLog: ImpostorClipLog[] = [];
   private impostorCycle = 0;
   private roundEndsAt: number | null = null;
 
@@ -121,10 +131,26 @@ export class Room {
   private listenStartedAt: number | null = null;
   private auxVotes = new Map<string, string>();
   private auxWinnerId: string | null = null;
+  private auxTieIds: string[] | null = null;
+  private auxUncontested = false;
+
+  private trophyFriends = new Map<string, Set<string>>();
+  private classicWizardFailed = new Set<string>();
+  private classicWizardEligible = new Map<string, number>();
+  private classicWizardHits = new Map<string, number>();
+  private buzzerFirstStreak = new Map<string, number>();
+  private buzzerClipOpened = false;
+  private buzzerClipLeftMs = PREVIEW_MS;
+  private buzzerMissAt = 0;
+  private buzzerMissBy: string | null = null;
+  private impostorMasterFailed = new Set<string>();
+  private impostorMasterEligible = new Map<string, number>();
 
   onChange: (() => void) | null = null;
   onEmpty: (() => void) | null = null;
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
+  private dropTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private departed = new Set<string>();
   private timerEndsAt: number | null = null;
   private timerDurationMs = 0;
   private popupId = 0;
@@ -147,6 +173,95 @@ export class Room {
 
   private emit() {
     this.onChange?.();
+  }
+
+  private bumpCount(map: Map<string, number>, id: string) {
+    map.set(id, (map.get(id) || 0) + 1);
+  }
+
+  private unlockTrophy(playerId: string, id: AchievementId) {
+    const player = this.player(playerId);
+    if (!player || player.isGuest) return;
+    void grantAchievement(player.id, id).catch(() => {});
+  }
+
+  private resetTrophyTracking() {
+    this.trophyFriends.clear();
+    this.classicWizardFailed.clear();
+    this.classicWizardEligible.clear();
+    this.classicWizardHits.clear();
+    this.buzzerFirstStreak.clear();
+    this.buzzerClipOpened = false;
+    this.buzzerMissAt = 0;
+    this.buzzerMissBy = null;
+    this.impostorMasterFailed.clear();
+    this.impostorMasterEligible.clear();
+  }
+
+  private async refreshTrophyFriends() {
+    const registered = this.players.filter((player) => !player.isGuest);
+    const next = new Map<string, Set<string>>();
+    await Promise.all(
+      registered.map(async (player) => {
+        try {
+          next.set(player.id, new Set(await listFriendIds(player.id)));
+        } catch {
+          next.set(player.id, new Set());
+        }
+      }),
+    );
+    this.trophyFriends = next;
+  }
+
+  private unlockBandIfFriendsPresent() {
+    const ids = this.players.filter((player) => !player.isGuest).map((player) => player.id);
+    for (const id of ids) {
+      const friends = this.trophyFriends.get(id);
+      if (friends && ids.some((other) => other !== id && friends.has(other))) {
+        this.unlockTrophy(id, "start_a_band");
+      }
+    }
+  }
+
+  private maybeUnlockPartyHost() {
+    if (this.phase !== "lobby") return;
+    if (this.players.length < MAX_PLAYERS) return;
+    this.unlockTrophy(this.hostId, "party_host");
+  }
+
+  private noteBuzzerFirst(playerId: string) {
+    for (const player of this.players) {
+      if (player.id === playerId) {
+        const n = (this.buzzerFirstStreak.get(player.id) || 0) + 1;
+        this.buzzerFirstStreak.set(player.id, n);
+        if (n >= 5) this.unlockTrophy(player.id, "trigger_happy");
+      } else {
+        this.buzzerFirstStreak.set(player.id, 0);
+      }
+    }
+  }
+
+  private noteBuzzerMiss(playerId: string) {
+    this.buzzerMissAt = Date.now();
+    this.buzzerMissBy = playerId;
+  }
+
+  private unlockEndOfMatchTrophies() {
+    if (this.mode === "classic" && this.totalRounds >= 5 && this.round >= 5) {
+      for (const player of this.players) {
+        if (player.isGuest || this.classicWizardFailed.has(player.id)) continue;
+        const eligible = this.classicWizardEligible.get(player.id) || 0;
+        const hits = this.classicWizardHits.get(player.id) || 0;
+        if (eligible > 0 && hits >= eligible) this.unlockTrophy(player.id, "wizard");
+      }
+    }
+    if (this.mode === "impostor" && this.totalRounds >= 5 && this.impostorCycle >= this.totalRounds) {
+      for (const player of this.players) {
+        if (player.isGuest || this.impostorMasterFailed.has(player.id)) continue;
+        const eligible = this.impostorMasterEligible.get(player.id) || 0;
+        if (eligible > 0) this.unlockTrophy(player.id, "mastermind");
+      }
+    }
   }
 
   private clearTimers() {
@@ -198,6 +313,28 @@ export class Room {
     if (this.penaltyPopupIds.size === 0) return;
     this.popupId += 1;
     this.award(deltas);
+    if (this.phase === "classic_submit") {
+      for (const id of this.penaltyPopupIds) this.unlockTrophy(id, "self_sabotage");
+    }
+  }
+
+  hasSeat(playerId: string) {
+    return Boolean(this.player(playerId)) && !this.departed.has(playerId);
+  }
+
+  private clearDrop(playerId: string) {
+    const timer = this.dropTimers.get(playerId);
+    if (timer) clearTimeout(timer);
+    this.dropTimers.delete(playerId);
+  }
+
+  private restorePlayer(identity: Identity) {
+    this.departed.delete(identity.id);
+    this.clearDrop(identity.id);
+    if (this.emptyTimer) {
+      clearTimeout(this.emptyTimer);
+      this.emptyTimer = null;
+    }
   }
 
   join(identity: Identity) {
@@ -208,10 +345,7 @@ export class Room {
       existing.avatar = identity.avatar;
       existing.avatarUrl = identity.avatarUrl;
       existing.isGuest = identity.isGuest;
-      if (this.emptyTimer) {
-        clearTimeout(this.emptyTimer);
-        this.emptyTimer = null;
-      }
+      this.restorePlayer(identity);
       this.emit();
       return;
     }
@@ -231,15 +365,63 @@ export class Room {
       isHost: false,
       connected: true,
     });
+    this.restorePlayer(identity);
+    this.maybeUnlockPartyHost();
+    if (this.phase !== "lobby") {
+      void this.refreshTrophyFriends().then(() => this.unlockBandIfFriendsPresent());
+    }
     this.emit();
+  }
+
+  reconnect(identity: Identity) {
+    if (!this.player(identity.id) || this.departed.has(identity.id)) return false;
+    this.join(identity);
+    return true;
+  }
+
+  drop(playerId: string) {
+    const p = this.player(playerId);
+    if (!p || this.departed.has(playerId)) return;
+    p.connected = false;
+    this.clearDrop(playerId);
+    const wait = this.phase === "lobby" || this.phase === "podium" ? 20_000 : 90_000;
+    this.dropTimers.set(
+      playerId,
+      setTimeout(() => {
+        this.dropTimers.delete(playerId);
+        if (this.player(playerId)?.connected) return;
+        this.leave(playerId);
+      }, wait),
+    );
+    this.maybeAdvanceAfterDrop();
+    this.emit();
+  }
+
+  private maybeAdvanceAfterDrop() {
+    if (this.phase === "classic_submit" && this.allConnectedSubmitted(this.classicSubs)) {
+      this.beginClassicPlayback();
+      return;
+    }
+    if (this.phase === "impostor_submit" && this.allConnectedSubmitted(this.impostorSubs)) {
+      this.beginImpostorPlayback();
+      return;
+    }
+    if (this.phase === "aux_submit" && this.allConnectedSubmitted(this.auxSubs)) {
+      this.beginAuxListen();
+      return;
+    }
+    if (this.phase === "aux_vote") this.maybeFinishAuxVote();
   }
 
   leave(playerId: string) {
     const p = this.player(playerId);
     if (!p) return;
+    this.clearDrop(playerId);
+    this.departed.add(playerId);
     p.connected = false;
     if (this.phase === "lobby") {
       this.players = this.players.filter((x) => x.id !== playerId);
+      this.departed.delete(playerId);
     }
     if (this.hostId === playerId) {
       const next = this.connectedPlayers()[0] || this.players[0];
@@ -260,6 +442,7 @@ export class Room {
       this.finishGame();
       return;
     }
+    if (this.phase === "aux_vote" && this.maybeFinishAuxVote()) return;
     this.emit();
   }
 
@@ -321,6 +504,7 @@ export class Room {
     this.requireHost(playerId);
     this.requireLobby();
     if (this.mode !== "buzzer") throw new Error("Playlists are for Buzzer Beater.");
+    if (this.buzzerChart !== "custom") throw new Error("Pick Custom playlist to add links.");
     if (this.buzzerPlaylists.length >= 6) throw new Error("That's enough playlists for one night.");
     const { label, tracks } = await resolvePlaylist(url);
     if (this.buzzerPlaylists.some((p) => p.url === url.trim())) {
@@ -352,6 +536,9 @@ export class Room {
     this.round = 0;
     this.usedTrackIds.clear();
     this.impostorCycle = 0;
+    this.resetTrophyTracking();
+    await this.refreshTrophyFriends();
+    this.unlockBandIfFriendsPresent();
 
     if (this.mode === "classic") {
       this.round = 0;
@@ -362,7 +549,10 @@ export class Room {
     if (this.mode === "buzzer") {
       await this.prepareBuzzerPlaylist();
       if (this.buzzerPlaylist.length === 0) {
-        throw new Error("Couldn't load tracks. Try another chart, add a playlist, or try again.");
+        if (this.buzzerChart === "custom") {
+          throw new Error("Add a playlist in Game settings first.");
+        }
+        throw new Error("Couldn't load tracks. Try another chart or try again.");
       }
       this.totalRounds = Math.min(this.totalRounds, this.buzzerPlaylist.length);
       this.beginBuzzerRound();
@@ -380,6 +570,8 @@ export class Room {
     this.auxEntries = [];
     this.auxVotes.clear();
     this.auxWinnerId = null;
+    this.auxTieIds = null;
+    this.auxUncontested = false;
     this.listenIndex = 0;
     this.phase = "aux_theme";
     this.round = 1;
@@ -445,6 +637,7 @@ export class Room {
     if (this.phase !== "classic_playing") {
       throw new Error("Guessing isn't open.");
     }
+    title = sanitizeText(title, 120);
     const current = this.classicOrder[this.classicIndex];
     if (!current) throw new Error("No track playing.");
     if (!this.player(playerId)) throw new Error("You're not in this room.");
@@ -464,6 +657,9 @@ export class Room {
     const points = Math.max(1, Math.ceil(remaining / 1000));
     this.classicScored.set(playerId, points);
     this.award({ [playerId]: points });
+    const elapsed = PREVIEW_MS - remaining;
+    if (elapsed <= 3000) this.unlockTrophy(playerId, "sonic");
+    if (remaining < 3000) this.unlockTrophy(playerId, "patience");
     const guessers = this.connectedPlayers().filter(
       (p) => p.id !== current.playerId || this.connectedPlayers().length === 1,
     );
@@ -476,6 +672,17 @@ export class Room {
 
   private classicReveal() {
     this.clearTimers();
+    const current = this.classicOrder[this.classicIndex];
+    if (current) {
+      const guessers = this.players.filter(
+        (p) => !p.isGuest && (p.id !== current.playerId || this.players.length === 1),
+      );
+      for (const player of guessers) {
+        this.bumpCount(this.classicWizardEligible, player.id);
+        if (this.classicScored.has(player.id)) this.bumpCount(this.classicWizardHits, player.id);
+        else this.classicWizardFailed.add(player.id);
+      }
+    }
     this.phase = "classic_reveal";
     this.later(REVEAL_MS, () => this.nextClassicClip());
     this.emit();
@@ -488,18 +695,15 @@ export class Room {
   }
 
   private async prepareBuzzerPlaylist() {
-    const fromPlaylists = uniqueTracks(
-      this.buzzerPlaylists.flatMap((p) => this.buzzerPlaylistTracks.get(p.url) || []),
-    );
-    let extras: Track[] = [];
-    if (fromPlaylists.length < Math.max(this.totalRounds, 8)) {
-      extras = await fetchChart(this.buzzerChart).catch(() => [] as Track[]);
+    if (this.buzzerChart === "custom") {
+      const fromPlaylists = uniqueTracks(
+        this.buzzerPlaylists.flatMap((p) => this.buzzerPlaylistTracks.get(p.url) || []),
+      );
+      this.buzzerPlaylist = shuffle(fromPlaylists).slice(0, Math.max(this.totalRounds, 1));
+      return;
     }
-    const mixed = uniqueTracks([
-      ...fromPlaylists,
-      ...extras.filter((t) => fromPlaylists.every((q) => q.trackId !== t.trackId)),
-    ]);
-    this.buzzerPlaylist = shuffle(mixed).slice(0, Math.max(this.totalRounds, 1));
+    const extras = await fetchChart(this.buzzerChart).catch(() => [] as Track[]);
+    this.buzzerPlaylist = shuffle(extras).slice(0, Math.max(this.totalRounds, 1));
   }
 
   private beginBuzzerRound() {
@@ -517,9 +721,13 @@ export class Room {
     this.buzzerTrack = track;
     this.usedTrackIds.add(track.trackId);
     this.playStartedAt = Date.now();
+    this.buzzerClipOpened = false;
+    this.buzzerClipLeftMs = PREVIEW_MS;
+    this.buzzerMissAt = 0;
+    this.buzzerMissBy = null;
     this.phase = "buzzer_playing";
     this.later(PREVIEW_MS, () => {
-      if (this.phase === "buzzer_playing" || this.phase === "buzzer_buzzed") {
+      if (this.phase === "buzzer_playing") {
         this.buzzerReveal();
       }
     });
@@ -534,11 +742,19 @@ export class Room {
     if (this.eliminated.has(playerId)) {
       throw new Error("You already burned this clip — hang tight for the next song.");
     }
+    const started = this.playStartedAt || Date.now();
+    this.buzzerClipLeftMs = Math.max(0, started + PREVIEW_MS - Date.now());
     this.buzzedBy = playerId;
     this.buzzDeadline = Date.now() + BUZZ_MS;
     this.phase = "buzzer_buzzed";
+    if (!this.buzzerClipOpened) {
+      this.buzzerClipOpened = true;
+      this.noteBuzzerFirst(playerId);
+    }
     this.later(BUZZ_MS, () => {
       if (this.phase === "buzzer_buzzed" && this.buzzedBy === playerId) {
+        this.unlockTrophy(playerId, "butterfingers");
+        this.noteBuzzerMiss(playerId);
         this.eliminated.add(playerId);
         this.resumeAfterWrongBuzz();
       }
@@ -550,18 +766,26 @@ export class Room {
     if (this.phase !== "buzzer_buzzed" || this.buzzedBy !== playerId) {
       throw new Error("It's not your buzz.");
     }
+    title = sanitizeText(title, 120);
     const track = this.buzzerTrack;
     if (!track) throw new Error("No track playing.");
     if (matchesSong(title, track.title)) {
-      const remaining = Math.max(
-        0,
-        (this.playStartedAt || Date.now()) + PREVIEW_MS - Date.now(),
-      );
+      const remaining = this.buzzerClipLeftMs;
       const points = Math.round(60 + (remaining / 1000) * 4);
       this.award({ [playerId]: points });
+      if (
+        this.buzzerMissBy &&
+        this.buzzerMissBy !== playerId &&
+        Date.now() - this.buzzerMissAt <= 8000
+      ) {
+        this.unlockTrophy(playerId, "snatcher");
+      }
+      this.buzzerMissBy = null;
       this.buzzerReveal();
       return;
     }
+    this.unlockTrophy(playerId, "butterfingers");
+    this.noteBuzzerMiss(playerId);
     this.eliminated.add(playerId);
     this.resumeAfterWrongBuzz();
   }
@@ -570,8 +794,8 @@ export class Room {
     this.clearTimers();
     this.buzzedBy = null;
     this.buzzDeadline = null;
-    const elapsed = Date.now() - (this.playStartedAt || Date.now());
-    const left = PREVIEW_MS - elapsed;
+    const left = this.buzzerClipLeftMs;
+    this.playStartedAt = Date.now() - (PREVIEW_MS - left);
     const alive = this.connectedPlayers().filter((p) => !this.eliminated.has(p.id));
     if (left <= 400 || alive.length === 0) {
       this.buzzerReveal();
@@ -579,7 +803,7 @@ export class Room {
     }
     this.phase = "buzzer_playing";
     this.later(left, () => {
-      if (this.phase === "buzzer_playing" || this.phase === "buzzer_buzzed") {
+      if (this.phase === "buzzer_playing") {
         this.buzzerReveal();
       }
     });
@@ -588,6 +812,9 @@ export class Room {
 
   private buzzerReveal() {
     this.clearTimers();
+    if (!this.buzzerClipOpened) {
+      this.buzzerFirstStreak.clear();
+    }
     this.phase = "buzzer_reveal";
     this.buzzedBy = null;
     this.buzzDeadline = null;
@@ -638,9 +865,11 @@ export class Room {
   }
 
   submitTrack(playerId: string, track: Track) {
+    const safe = sanitizeTrack(track);
+    if (!safe) throw new Error("Pick a real song from search.");
     if (!this.player(playerId)) throw new Error("You're not in this room.");
     if (this.phase === "classic_submit") {
-      this.classicSubs.set(playerId, track);
+      this.classicSubs.set(playerId, safe);
       this.emit();
       if (this.allConnectedSubmitted(this.classicSubs)) {
         this.beginClassicPlayback();
@@ -648,7 +877,7 @@ export class Room {
       return;
     }
     if (this.phase === "impostor_submit") {
-      this.impostorSubs.set(playerId, track);
+      this.impostorSubs.set(playerId, safe);
       this.emit();
       if (this.allConnectedSubmitted(this.impostorSubs)) {
         this.beginImpostorPlayback();
@@ -656,7 +885,7 @@ export class Room {
       return;
     }
     if (this.phase === "aux_submit") {
-      this.auxSubs.set(playerId, track);
+      this.auxSubs.set(playerId, safe);
       this.emit();
       if (this.allConnectedSubmitted(this.auxSubs)) {
         this.beginAuxListen();
@@ -676,6 +905,8 @@ export class Room {
     this.impostorSubs.clear();
     this.impostorGuesses.clear();
     this.impostorPoints.clear();
+    this.impostorPending.clear();
+    this.impostorClipLog = [];
     this.impostorOrder = [];
     this.impostorIndex = 0;
     this.impostorCycle += 1;
@@ -738,7 +969,13 @@ export class Room {
     if (this.impostorGuesses.has(playerId)) {
       throw new Error("You already locked this one in.");
     }
-    this.impostorGuesses.set(playerId, { submitterId: guess.submitterId });
+    this.impostorGuesses.set(playerId, {
+      submitterId: guess.submitterId,
+      remainingSec: Math.max(
+        0,
+        Math.ceil(((this.playStartedAt || Date.now()) + PREVIEW_MS - Date.now()) / 1000),
+      ),
+    });
     const guessers = this.impostorGuessers();
     if (guessers.length > 0 && guessers.every((p) => this.impostorGuesses.has(p.id))) {
       this.impostorReveal();
@@ -759,19 +996,33 @@ export class Room {
       this.beginImpostorRecap();
       return;
     }
-    const remainingSec = Math.max(
-      0,
-      Math.ceil(((this.playStartedAt || Date.now()) + PREVIEW_MS - Date.now()) / 1000),
-    );
-    const deltas: Record<string, number> = {};
-    for (const p of this.impostorGuessers()) {
-      const guess = this.impostorGuesses.get(p.id);
-      const ok = guess?.submitterId === current.playerId;
-      const points = ok ? 20 + remainingSec : 0;
-      this.impostorPoints.set(p.id, points);
-      if (points) deltas[p.id] = points;
+    this.impostorClipLog.push({
+      playerId: current.playerId,
+      track: current.track,
+      guesses: new Map(this.impostorGuesses),
+    });
+    for (const [id, guess] of this.impostorGuesses) {
+      const ok = guess.submitterId === current.playerId;
+      const points = ok ? guess.remainingSec : 0;
+      if (points) this.impostorPending.set(id, (this.impostorPending.get(id) || 0) + points);
     }
-    this.award(deltas);
+    for (const player of this.players) {
+      if (player.isGuest || player.id === current.playerId) continue;
+      this.bumpCount(this.impostorMasterEligible, player.id);
+      const guess = this.impostorGuesses.get(player.id);
+      const ok = guess?.submitterId === current.playerId;
+      if (!ok) this.impostorMasterFailed.add(player.id);
+      if (
+        guess &&
+        !ok &&
+        this.trophyFriends.get(player.id)?.has(current.playerId)
+      ) {
+        this.unlockTrophy(player.id, "betrayal");
+      }
+    }
+    const named = [...this.impostorGuesses.values()].some((guess) => guess.submitterId === current.playerId);
+    if (!named) this.unlockTrophy(current.playerId, "in_plain_sight");
+    this.lastDeltas = null;
     this.phase = "impostor_reveal";
     this.later(CLIP_RESULT_MS, () => this.nextImpostorOrFinish());
     this.emit();
@@ -789,6 +1040,12 @@ export class Room {
 
   private beginImpostorRecap() {
     this.clearTimers();
+    const deltas: Record<string, number> = {};
+    for (const [id, n] of this.impostorPending) {
+      if (n) deltas[id] = n;
+    }
+    if (Object.keys(deltas).length) this.award(deltas);
+    else this.lastDeltas = null;
     this.phase = "impostor_recap";
     this.later(RECAP_MS, () => this.afterImpostorRecap());
     this.emit();
@@ -808,12 +1065,14 @@ export class Room {
     if (playerId !== this.themeSetterId) {
       throw new Error("Only the DJ sets the theme this round.");
     }
-    const t = theme.trim().slice(0, 80);
+    const t = sanitizeText(theme, 80);
     if (t.length < 2) throw new Error("Give the room a real theme.");
     this.theme = t;
     this.auxSubs.clear();
     this.auxVotes.clear();
     this.auxWinnerId = null;
+    this.auxTieIds = null;
+    this.auxUncontested = false;
     this.auxEntries = [];
     this.phase = "aux_submit";
     this.later(SUBMIT_MS, () => {
@@ -840,8 +1099,7 @@ export class Room {
   private startAuxListenClip() {
     this.clearTimers();
     if (this.listenIndex >= this.auxEntries.length) {
-      this.phase = "aux_vote";
-      this.emit();
+      this.beginAuxVote();
       return;
     }
     this.phase = "aux_listen";
@@ -850,48 +1108,113 @@ export class Room {
     this.emit();
   }
 
-  private nextAuxListen() {
+  private beginAuxVote() {
     this.clearTimers();
-    this.listenIndex += 1;
-    this.startAuxListenClip();
+    this.auxVotes.clear();
+    this.auxTieIds = null;
+    this.auxUncontested = false;
+    if (this.auxEntries.length === 0) {
+      this.nextAuxRoundOrFinish();
+      return;
+    }
+    if (this.auxEntries.length === 1) {
+      this.auxAward(this.auxEntries[0].playerId, true);
+      return;
+    }
+    this.phase = "aux_vote";
+    this.emit();
+    this.maybeFinishAuxVote();
+  }
+
+  private voteCandidates() {
+    if (this.auxTieIds && this.auxTieIds.length >= 2) return this.auxTieIds;
+    return this.auxEntries.map((entry) => entry.playerId);
+  }
+
+  private eligibleAuxVoters() {
+    const candidates = this.voteCandidates();
+    return this.connectedPlayers().filter((player) => candidates.some((id) => id !== player.id));
+  }
+
+  private maybeFinishAuxVote() {
+    if (this.phase !== "aux_vote") return false;
+    const voters = this.eligibleAuxVoters();
+    if (voters.length === 0) {
+      const pick = shuffle([...this.voteCandidates()])[0];
+      if (pick) this.auxAward(pick);
+      else this.nextAuxRoundOrFinish();
+      return true;
+    }
+    if (voters.every((player) => this.auxVotes.has(player.id))) {
+      this.auxTally();
+      return true;
+    }
+    return false;
   }
 
   vote(playerId: string, targetId: string) {
     if (this.phase !== "aux_vote") throw new Error("Voting isn't open.");
     if (!this.player(playerId)) throw new Error("You're not in this room.");
     if (playerId === targetId) throw new Error("You can't vote for yourself.");
-    if (!this.auxEntries.some((e) => e.playerId === targetId)) {
-      throw new Error("That submission isn't in this round.");
+    const candidates = this.voteCandidates();
+    if (!candidates.includes(targetId)) {
+      throw new Error(this.auxTieIds ? "Vote between the tied tracks." : "That submission isn't in this round.");
     }
     this.auxVotes.set(playerId, targetId);
     this.emit();
-    const voters = this.connectedPlayers();
-    if (voters.every((p) => this.auxVotes.has(p.id))) {
-      this.auxReveal();
-    }
+    this.maybeFinishAuxVote();
   }
 
-  private auxReveal() {
-    this.clearTimers();
+  private auxTally() {
+    const candidates = this.voteCandidates();
+    if (candidates.length === 0) {
+      this.nextAuxRoundOrFinish();
+      return;
+    }
     const counts = new Map<string, number>();
+    for (const id of candidates) counts.set(id, 0);
     for (const target of this.auxVotes.values()) {
-      counts.set(target, (counts.get(target) || 0) + 1);
+      if (counts.has(target)) counts.set(target, (counts.get(target) || 0) + 1);
     }
-    let winner = this.auxEntries[0]?.playerId || this.hostId;
     let best = -1;
-    for (const entry of this.auxEntries) {
-      const n = counts.get(entry.playerId) || 0;
-      if (n > best) {
-        best = n;
-        winner = entry.playerId;
-      }
+    for (const n of counts.values()) {
+      if (n > best) best = n;
     }
-    this.auxWinnerId = winner;
-    this.themeSetterId = winner;
-    this.award({ [winner]: 100 });
+    const tied = candidates.filter((id) => (counts.get(id) || 0) === best);
+    if (tied.length <= 1) {
+      this.auxAward(tied[0] || candidates[0]);
+      return;
+    }
+    const sameRunoff =
+      Boolean(this.auxTieIds) &&
+      tied.length === this.auxTieIds!.length &&
+      tied.every((id) => this.auxTieIds!.includes(id));
+    if (sameRunoff) {
+      this.auxAward(shuffle([...tied])[0]);
+      return;
+    }
+    this.auxTieIds = tied;
+    this.auxVotes.clear();
+    this.phase = "aux_vote";
+    this.emit();
+    this.maybeFinishAuxVote();
+  }
+
+  private auxAward(winnerId: string, uncontested = false) {
+    this.clearTimers();
+    this.auxUncontested = uncontested;
+    this.auxWinnerId = winnerId;
+    this.themeSetterId = winnerId;
+    this.award({ [winnerId]: 100 });
     this.phase = "aux_reveal";
     this.later(REVEAL_MS, () => this.nextAuxRoundOrFinish());
     this.emit();
+  }
+
+  private nextAuxListen() {
+    this.clearTimers();
+    this.listenIndex += 1;
+    this.startAuxListenClip();
   }
 
   private nextAuxRoundOrFinish() {
@@ -908,6 +1231,8 @@ export class Room {
     this.listenIndex = 0;
     this.lastDeltas = null;
     this.auxWinnerId = null;
+    this.auxTieIds = null;
+    this.auxUncontested = false;
     this.phase = "aux_theme";
     this.emit();
   }
@@ -917,9 +1242,26 @@ export class Room {
     const firstPodium = this.phase !== "podium";
     this.phase = "podium";
     if (firstPodium) {
-      const best = Math.max(0, ...this.players.map((player) => player.score));
-      const winners = this.players.filter((player) => !player.isGuest && player.score === best).map((player) => player.id);
-      void recordMatchWins(winners).catch(() => {});
+      const scores = this.players.map((player) => player.score);
+      const best = scores.length ? Math.max(...scores) : 0;
+      const ranked = [...new Set(scores)].sort((a, b) => b - a);
+      const second = ranked[1];
+      if (second !== undefined && second < best) {
+        for (const player of this.players) {
+          if (player.score === second) this.unlockTrophy(player.id, "backup_act");
+        }
+      }
+      void recordMatchStats(
+        this.mode,
+        this.players
+          .filter((player) => !player.isGuest)
+          .map((player) => ({
+            userId: player.id,
+            score: player.score,
+            won: player.score === best,
+          })),
+      ).catch(() => {});
+      this.unlockEndOfMatchTrophies();
     }
     this.emit();
   }
@@ -940,10 +1282,19 @@ export class Room {
     this.impostorOrder = [];
     this.impostorGuesses.clear();
     this.impostorPoints.clear();
+    this.impostorPending.clear();
+    this.impostorClipLog = [];
     this.impostorCycle = 0;
     this.auxSubs.clear();
     this.auxEntries = [];
     this.auxVotes.clear();
+    this.auxWinnerId = null;
+    this.auxTieIds = null;
+    this.auxUncontested = false;
+    this.departed.clear();
+    for (const timer of this.dropTimers.values()) clearTimeout(timer);
+    this.dropTimers.clear();
+    this.resetTrophyTracking();
     this.theme = "";
     this.lastDeltas = null;
     this.penaltyPopupIds.clear();
@@ -1020,6 +1371,7 @@ export class Room {
     return {
       playStartedAt: this.playStartedAt,
       previewMs: PREVIEW_MS,
+      answerMs: BUZZ_MS,
       buzzedBy: this.buzzedBy,
       buzzDeadline: this.buzzDeadline,
       track: track
@@ -1056,18 +1408,28 @@ export class Room {
         : null,
       isYours: Boolean(current && current.playerId === playerId && this.phase !== "impostor_submit"),
       yourSubmission: this.impostorSubs.get(playerId) || null,
-      yourGuess: this.impostorGuesses.get(playerId) || null,
+      yourGuess: this.impostorGuesses.get(playerId)
+        ? { submitterId: this.impostorGuesses.get(playerId)!.submitterId }
+        : null,
       guessedCount: this.impostorGuesses.size,
       guesserTotal: guessers.length,
       clipIndex: this.impostorIndex,
       clipTotal: this.impostorOrder.length,
-      yourPoints: this.impostorPoints.get(playerId) ?? null,
+      yourPoints: this.phase === "impostor_recap" ? this.impostorPending.get(playerId) ?? 0 : null,
       recap:
         this.phase === "impostor_recap"
-          ? this.impostorOrder.map((entry) => ({
-              track: entry.track,
-              submitterName: this.player(entry.playerId)?.name || "Unknown",
-            }))
+          ? this.impostorClipLog.map((clip) => {
+              const yours = clip.playerId === playerId;
+              const guess = clip.guesses.get(playerId);
+              const correct = yours ? null : Boolean(guess && guess.submitterId === clip.playerId);
+              return {
+                track: clip.track,
+                submitterName: this.player(clip.playerId)?.name || "Unknown",
+                yours,
+                guessedName: guess ? this.player(guess.submitterId)?.name || "Unknown" : null,
+                correct,
+              };
+            })
           : null,
     };
   }
@@ -1110,11 +1472,16 @@ export class Room {
       yourVote: this.auxVotes.get(playerId) || null,
       winnerId: this.phase === "aux_reveal" ? this.auxWinnerId : null,
       votedCount: this.auxVotes.size,
+      voterTotal: this.eligibleAuxVoters().length,
+      runoffIds: this.phase === "aux_vote" || this.phase === "aux_reveal" ? this.auxTieIds : null,
+      uncontested: this.phase === "aux_reveal" && this.auxUncontested,
     };
   }
 
   destroy() {
     this.clearTimers();
+    for (const timer of this.dropTimers.values()) clearTimeout(timer);
+    this.dropTimers.clear();
     if (this.emptyTimer) clearTimeout(this.emptyTimer);
   }
 }
@@ -1130,6 +1497,13 @@ export class RoomManager {
     for (const room of this.rooms.values()) {
       const player = room.players.find((p) => p.id === playerId && p.connected);
       if (player) return room;
+    }
+    return undefined;
+  }
+
+  findSeat(playerId: string) {
+    for (const room of this.rooms.values()) {
+      if (room.hasSeat(playerId)) return room;
     }
     return undefined;
   }

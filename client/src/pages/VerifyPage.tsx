@@ -33,9 +33,9 @@ export default function VerifyPage() {
   return (
     <AccountShell>
       <section className="g-card account-card">
-        <p className="lime-title">
+        <h1 className="lime-title">
           {status === "ok" ? "Account verified" : status === "working" ? "One second" : "Couldn't verify"}
-        </p>
+        </h1>
         <p className="play-copy">{message}</p>
         {status !== "working" && (
           <Link to="/" className="start-btn" viewTransition>
