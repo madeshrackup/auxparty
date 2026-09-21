@@ -37,8 +37,6 @@ import {
   type GuardRequest,
 } from "./security.ts";
 
-assertProductionEnv();
-
 function bodyOf(req: VercelRequest) {
   if (typeof req.body === "string") {
     try {
@@ -428,6 +426,12 @@ export async function removeAccount(req: VercelRequest, res: VercelResponse) {
 }
 
 export async function musicSearch(req: VercelRequest, res: VercelResponse) {
+  try {
+    assertProductionEnv("game");
+  } catch (err) {
+    sendAuthError(res, err, "Server is misconfigured.");
+    return;
+  }
   if (!guard(req, res)) return;
   if (req.method !== "GET") {
     res.status(405).json({ error: "Method not allowed." });
@@ -463,6 +467,12 @@ const AUTH_ACTIONS = {
 } as const;
 
 export async function authAction(req: VercelRequest, res: VercelResponse) {
+  try {
+    assertProductionEnv("game");
+  } catch (err) {
+    sendAuthError(res, err, "Server is misconfigured.");
+    return;
+  }
   if (!guard(req, res)) return;
   const raw = req.query.action;
   const action = Array.isArray(raw) ? raw[0] : raw;

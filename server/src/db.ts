@@ -731,15 +731,23 @@ export async function listFriendMessages(userId: string, otherId: string, limit 
 
 export async function grantAchievement(userId: string, achievementId: string): Promise<boolean> {
   try {
-    const { error } = await sb().from("achievements").insert({
-      user_id: userId,
-      achievement_id: achievementId,
-    });
-    if (!error) return true;
-    if (error.code === "23505") return false;
-    if (!/achievements|schema cache|does not exist|duplicate/i.test(error.message || "")) {
+    const { data, error } = await sb()
+      .from("achievements")
+      .upsert(
+        {
+          user_id: userId,
+          achievement_id: achievementId,
+        },
+        { onConflict: "user_id,achievement_id", ignoreDuplicates: true },
+      )
+      .select("achievement_id");
+    if (error) {
+      if (!/achievements|schema cache|does not exist|duplicate/i.test(error.message || "")) {
+        return false;
+      }
       return false;
     }
+    return Array.isArray(data) && data.length > 0;
   } catch {
     /* trophies stay optional until schema-achievements.sql is applied */
   }
