@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import AccountShell from "../components/AccountShell";
+import BackButton, { PLAY_HOME } from "../components/BackButton";
 import { clearGuestData } from "../identity";
 import { LEGAL, LEGAL_UPDATED, type LegalDoc } from "../legalContent";
 
@@ -32,6 +33,7 @@ export default function LegalPage({ doc }: { doc: LegalDoc }) {
             Clear guest data on this device
           </button>
         )}
+        <BackButton to={PLAY_HOME}>Back to Aux Party</BackButton>
         <p className="legal-links">
           <Link to="/privacy" viewTransition>
             Privacy

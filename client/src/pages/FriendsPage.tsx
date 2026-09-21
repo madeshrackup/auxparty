@@ -1,6 +1,7 @@
 import { useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import AccountShell from "../components/AccountShell";
+import BackButton, { PLAY_HOME } from "../components/BackButton";
 import FriendsPanel from "../components/FriendsPanel";
 import { useAuth } from "../useAuth";
 
@@ -17,11 +18,7 @@ export default function FriendsPage() {
   return (
     <AccountShell showMenu>
       <FriendsPanel headingAs="h1" />
-      <p className="account-back">
-        <Link to="/" className="text-link" viewTransition>
-          ‹ Back to Aux Party
-        </Link>
-      </p>
+      <BackButton to={PLAY_HOME}>Back to Aux Party</BackButton>
     </AccountShell>
   );
 }

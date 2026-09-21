@@ -1,13 +1,13 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { IconPeople } from "./PartyArt";
+import { getAvatar } from "../identity";
+import Avatar from "./Avatar";
 import TrophyLink from "./TrophyLink";
 import UserMenu from "./UserMenu";
 import { useAuth } from "../useAuth";
 
 export default function AccountShell({
   children,
-  showMenu = false,
 }: {
   children: ReactNode;
   showMenu?: boolean;
@@ -22,11 +22,12 @@ export default function AccountShell({
           <span className="brand-name">AUX PARTY</span>
           <span className="brand-tag">THE MUSIC QUIZ</span>
         </Link>
-        {showMenu && auth.user ? (
+        {auth.user ? (
           <UserMenu />
         ) : (
-          <span className="live-pill">
-            <IconPeople /> PARTY MODE
+          <span className="you-chip">
+            <Avatar id={getAvatar()} size={28} />
+            {auth.displayName}
           </span>
         )}
       </header>

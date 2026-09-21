@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import type { FriendMessage, FriendPresence, FriendSearchHit, SocialState, SocketAck } from "@shared/types";
 import { emitAck, getSocket, resetSocket } from "../socket";
 import { useAuth } from "../useAuth";
-import { IconLock } from "./PartyArt";
+import { IconLock, IconPlus } from "./PartyArt";
 import { UserBadge } from "./UserMenu";
 
 const EMPTY: SocialState = { friends: [], incoming: [], outgoing: [], invites: [] };
@@ -147,7 +147,7 @@ export default function FriendsPanel({
         <div className="friends-locked">
           <IconLock />
           <p className="friends-locked-copy">
-            Register to add friends and join their games from your friends list.
+            Register to add friends and party together!
           </p>
           <button
             className="start-btn alt"
@@ -161,7 +161,7 @@ export default function FriendsPanel({
               navigate("/?signup=1");
             }}
           >
-            Register
+            <IconPlus /> Register
           </button>
         </div>
       </section>

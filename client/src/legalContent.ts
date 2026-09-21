@@ -39,7 +39,7 @@ export const LEGAL: Record<LegalDoc, { title: string; intro: string; sections: S
         heading: "Why we use it",
         body: [
           "To create and sign in to your account, verify email, reset passwords, run multiplayer rooms, keep score, and show friends and trophies.",
-          "The session cookie keeps you logged in. Guest storage remembers your nickname on this device.",
+          "The session cookie keeps you logged in. Guest storage remembers your nickname on this device. Game settings such as volume are stored in a small prefs cookie on this browser.",
         ],
       },
       {
@@ -130,13 +130,14 @@ export const LEGAL: Record<LegalDoc, { title: string; intro: string; sections: S
   cookies: {
     title: "Cookie Policy",
     intro:
-      "Aux Party uses a small set of essential cookies and device storage so you can stay in a room and keep a nickname. We do not use advertising or analytics cookies.",
+      "Aux Party uses a small set of essential cookies and device storage so you can stay in a room, keep a nickname, and remember game settings. We do not use advertising or analytics cookies.",
     sections: [
       {
         heading: "Essential cookies",
         body: [
           "aux_sid: set when you log in. It is httpOnly, SameSite=Lax, Secure on HTTPS, lasts about 30 days, and tells the server who you are. Clearing it signs you out.",
           "aux_csrf: a non-httpOnly security token used with mutating API requests. Same flags as the session cookie except JavaScript must read it to send the matching header.",
+          "aux_prefs: remembers in-game volume and default lobby settings on this browser. SameSite=Lax, Secure on HTTPS, lasts about a year. JavaScript can read it so the mixer and create-room defaults still work. A copy also lives in local storage if cookies are blocked.",
         ],
       },
       {

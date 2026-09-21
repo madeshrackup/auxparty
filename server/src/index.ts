@@ -32,7 +32,15 @@ import {
   unfriend,
   type Presence,
 } from "./social.ts";
-import type { BuzzerChartId, GameMode, ImpostorGuess, LobbyPreview, Track } from "../../shared/types.ts";
+import {
+  ACHIEVEMENTS,
+  type AchievementId,
+  type BuzzerChartId,
+  type GameMode,
+  type ImpostorGuess,
+  type LobbyPreview,
+  type Track,
+} from "../../shared/types.ts";
 
 const PORT = Number(process.env.PORT) || 3001;
 
@@ -157,6 +165,19 @@ function attachRoom(room: { code: string }) {
   const r = rooms.get(room.code);
   if (!r) return;
   r.onChange = () => broadcast(r.code);
+  r.onAchievement = emitAchievement;
+}
+
+function emitAchievement(playerId: string, id: AchievementId) {
+  const sid = socketsByPlayer.get(playerId);
+  if (!sid) return;
+  const def = ACHIEVEMENTS.find((item) => item.id === id);
+  if (!def) return;
+  io.to(sid).emit("achievement:unlocked", {
+    id: def.id,
+    name: def.name,
+    description: def.description,
+  });
 }
 
 function presenceFor(viewerId: string, friendId: string): Presence {
@@ -234,7 +255,7 @@ io.on("connection", (socket) => {
 
   socket.on(
     "room:create",
-    async (payload: { name?: string; avatar?: string; mode?: GameMode; isPrivate?: boolean }, ack?: (a: { ok: boolean; error?: string; code?: string }) => void) => {
+    async (payload: { name?: string; avatar?: string; mode?: GameMode; isPrivate?: boolean; totalRounds?: number }, ack?: (a: { ok: boolean; error?: string; code?: string }) => void) => {
       try {
         if (payload?.name) {
           identity = { ...identity, name: sanitizeName(payload.name) };
@@ -243,7 +264,7 @@ io.on("connection", (socket) => {
         socketsByPlayer.set(identity.id, socket.id);
         const mode = isGameMode(payload?.mode) ? payload.mode : undefined;
         const isPrivate = payload?.isPrivate !== false;
-        const room = rooms.create(identity, mode, isPrivate);
+        const room = rooms.create(identity, mode, isPrivate, payload?.totalRounds);
         attachRoom(room);
         socket.data.roomCode = room.code;
         socket.join(room.code);

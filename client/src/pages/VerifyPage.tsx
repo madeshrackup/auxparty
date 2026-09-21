@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import AccountShell from "../components/AccountShell";
+import BackButton, { PLAY_HOME } from "../components/BackButton";
 import { verifyEmail } from "../api";
 
 export default function VerifyPage() {
@@ -38,9 +39,7 @@ export default function VerifyPage() {
         </h1>
         <p className="play-copy">{message}</p>
         {status !== "working" && (
-          <Link to="/" className="start-btn" viewTransition>
-            Return to Aux Party
-          </Link>
+          <BackButton to={PLAY_HOME}>Back to Aux Party</BackButton>
         )}
       </section>
     </AccountShell>

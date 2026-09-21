@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import AccountShell from "../components/AccountShell";
+import BackButton from "../components/BackButton";
 import PasswordField, { PasswordMeter } from "../components/PasswordField";
 import { passwordIssues, passwordMeetsPolicy } from "@shared/credentials";
 import { useAuth } from "../useAuth";
@@ -59,9 +60,7 @@ export default function ChangePasswordPage() {
           <>
             <h1 className="lime-title">Password changed</h1>
             <p className="play-copy">You're still signed in here. Other devices were signed out. Use the new password next time you log in.</p>
-            <Link to="/account" className="start-btn" viewTransition>
-              Back to profile
-            </Link>
+            <BackButton to="/account">Back to profile</BackButton>
           </>
         ) : challengeId ? (
           <form
@@ -123,9 +122,7 @@ export default function ChangePasswordPage() {
             <button className="start-btn" disabled={busy || !passwordMeetsPolicy(newPassword) || newPassword !== confirm} type="submit">
               Email me a code
             </button>
-            <Link to="/account" className="text-link" viewTransition>
-              ‹ Back to profile
-            </Link>
+            <BackButton to="/account">Back to profile</BackButton>
           </form>
         )}
       </section>

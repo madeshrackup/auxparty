@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   emptyPlayerStats,
   GAME_MODE_LABELS,
@@ -7,6 +7,7 @@ import {
   type PlayerStats,
 } from "@shared/types";
 import AccountShell from "../components/AccountShell";
+import BackButton, { PLAY_HOME } from "../components/BackButton";
 import { getStats } from "../api";
 import { useAuth } from "../useAuth";
 
@@ -93,9 +94,7 @@ export default function StatsPage() {
             })}
           </>
         )}
-        <Link to="/" className="text-link" viewTransition>
-          ‹ Back to Aux Party
-        </Link>
+        <BackButton to={PLAY_HOME}>Back to Aux Party</BackButton>
       </section>
     </AccountShell>
   );

@@ -12,7 +12,7 @@ import {
   deleteAccount as deleteAccountApi,
 } from "./api";
 import { getGuestName, setGuestName as persistGuest } from "./identity";
-import { resetSocket } from "./socket";
+import { queuePendingAchievement } from "./components/AchievementToasts";
 import type { AuthUser } from "@shared/types";
 
 type AuthState = {
@@ -84,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         consents: { acceptedTerms: boolean; ageConfirmed: boolean },
       ) {
         const r = await registerApi(username, email, password, consents);
+        queuePendingAchievement("welcome", username);
         resetSocket();
         setError("");
         return r;

@@ -479,3 +479,9 @@ export type AchievementsState = {
   unlocked: AchievementUnlock[];
   wins: number;
 };
+
+export type AchievementUnlockedPayload = {
+  id: AchievementId;
+  name: string;
+  description: string;
+};

@@ -94,10 +94,36 @@ export function seoForPath(pathname: string): SeoPage {
     return {
       title: "Cookie Policy | Aux Party",
       description:
-        "Aux Party uses an essential login cookie and guest nickname storage. No advertising or analytics cookies.",
+        "Aux Party uses essential cookies for login and game settings, plus guest nickname storage. No advertising or analytics cookies.",
       canonical: url("/cookies"),
       robots: INDEX,
       schema: webPage("Cookie Policy", "/cookies", "Cookies and device storage used by Aux Party."),
+    };
+  }
+  if (pathname === "/settings") {
+    return {
+      title: "Game settings | Aux Party",
+      description: "Set in-game volume, default lobby, and rounds for Aux Party on this browser.",
+      canonical: url("/settings"),
+      robots: NOINDEX,
+    };
+  }
+  if (pathname === "/credits") {
+    return {
+      title: "Credits | Aux Party",
+      description: "Credits for Aux Party, including owner and lead developer Madesh, and the catalogues that power song previews.",
+      canonical: url("/credits"),
+      robots: INDEX,
+      schema: webPage("Credits", "/credits", "Credits for Aux Party."),
+    };
+  }
+  if (pathname === "/how-to-play") {
+    return {
+      title: "How to play | Aux Party",
+      description: "Share a code, join a party, play music quizzes, and score points with friends in Aux Party.",
+      canonical: url("/how-to-play"),
+      robots: INDEX,
+      schema: webPage("How to play", "/how-to-play", "How to play Aux Party."),
     };
   }
   if (pathname === "/achievements") {

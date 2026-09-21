@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import AccountShell from "../components/AccountShell";
+import BackButton, { PLAY_HOME } from "../components/BackButton";
 import PasswordField, { PasswordMeter } from "../components/PasswordField";
 import { passwordIssues, passwordMeetsPolicy } from "@shared/credentials";
 import { resetPassword } from "../api";
@@ -37,9 +38,7 @@ export default function ResetPage() {
           <>
             <h1 className="lime-title">Password updated</h1>
             <p className="play-copy">Return to Aux Party to re-login with your new details.</p>
-            <Link to="/" className="start-btn" viewTransition>
-              Return to Aux Party
-            </Link>
+            <BackButton to={PLAY_HOME}>Back to Aux Party</BackButton>
           </>
         ) : (
           <form

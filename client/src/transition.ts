@@ -1,14 +1,23 @@
 import { flushSync } from "react-dom";
+import type { NavigateFunction, To } from "react-router-dom";
 
 type ViewTransition = {
   finished?: Promise<unknown>;
 };
 
 type ViewTransitionDocument = Document & {
-  startViewTransition?: (update: () => void) => ViewTransition;
+  startViewTransition?: (update: () => void | Promise<void>) => ViewTransition;
 };
 
 let active: Promise<unknown> | null = null;
+
+function nextPaint() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
 
 export function runViewTransition(update: () => void) {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -18,8 +27,10 @@ export function runViewTransition(update: () => void) {
     return;
   }
   try {
-    const vt = start(() => {
+    const vt = start(async () => {
       flushSync(update);
+      // React Router navigations are concurrent; wait until the new route commits.
+      await nextPaint();
     });
     active = Promise.race([
       Promise.resolve(vt.finished ?? undefined),
@@ -33,4 +44,10 @@ export function runViewTransition(update: () => void) {
     active = null;
     update();
   }
+}
+
+export function transitionNavigate(navigate: NavigateFunction, to: To) {
+  runViewTransition(() => {
+    navigate(to, { flushSync: true });
+  });
 }

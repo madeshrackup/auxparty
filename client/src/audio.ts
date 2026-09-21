@@ -1,9 +1,20 @@
 const audio = new Audio();
 audio.preload = "auto";
+audio.volume = 0.8;
 
 let currentUrl = "";
 let currentStartedAt = 0;
 let buzzCtx: AudioContext | null = null;
+let masterVolume = 0.8;
+
+export function setMasterVolume(n: number) {
+  masterVolume = Math.min(1, Math.max(0, n));
+  audio.volume = masterVolume;
+}
+
+export function getMasterVolume() {
+  return masterVolume;
+}
 
 function isSafeMediaUrl(url: string) {
   try {
@@ -65,7 +76,7 @@ export function playBuzz() {
     const now = ctx.currentTime;
     const master = ctx.createGain();
     master.gain.setValueAtTime(0.0001, now);
-    master.gain.exponentialRampToValueAtTime(0.28, now + 0.012);
+    master.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.28 * masterVolume), now + 0.012);
     master.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
     master.connect(ctx.destination);
 
@@ -88,6 +99,36 @@ export function playBuzz() {
     stingGain.connect(master);
     sting.start(now);
     sting.stop(now + 0.22);
+  } catch {
+    /* autoplay may need a click */
+  }
+}
+
+export function playAchievement() {
+  try {
+    const ctx = getBuzzCtx();
+    if (ctx.state === "suspended") void ctx.resume();
+    const now = ctx.currentTime;
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(Math.max(0.0001, 0.2 * masterVolume), now);
+    master.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
+    master.connect(ctx.destination);
+
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((freq, i) => {
+      const t = now + i * 0.08;
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, t);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.24, t + 0.018);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start(t);
+      osc.stop(t + 0.34);
+    });
   } catch {
     /* autoplay may need a click */
   }

@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { MIN_PLAYERS, MAX_ROUNDS, MIN_ROUNDS, BUZZER_CHARTS, GAME_MODE_BLURBS, GAME_MODE_LABELS, type GameMode, type RoomPopup, type RoomState, type SocketAck, type Track } from "@shared/types";
+import { MIN_PLAYERS, MAX_ROUNDS, MIN_ROUNDS, BUZZER_CHARTS, GAME_MODE_BLURBS, GAME_MODE_LABELS, GAME_MODE_ORDER, type GameMode, type RoomPopup, type RoomState, type SocketAck, type Track } from "@shared/types";
 import Artwork from "../components/Artwork";
+import Avatar from "../components/Avatar";
 import Dropdown from "../components/Dropdown";
 import Scoreboard from "../components/Scoreboard";
 import TimerBar from "../components/TimerBar";
 import TrackSearch from "../components/TrackSearch";
-import { pausePreview, playBuzz, playPreview, stopPreview, unlockAudio } from "../audio";
+import { pausePreview, playBuzz, playPreview, setMasterVolume, stopPreview, unlockAudio } from "../audio";
 import { emitAck, emitLeave, getSocket } from "../socket";
 import { useAuth } from "../useAuth";
 import UserMenu from "../components/UserMenu";
 import FriendsPanel from "../components/FriendsPanel";
+import BackButton from "../components/BackButton";
 import { getAvatar } from "../identity";
 import { runViewTransition } from "../transition";
+import { IconCopy, IconGear, IconLink, IconLock, IconNote, IconPeople } from "../components/PartyArt";
+import { loadPrefs, savePrefs } from "../prefs";
 
 function sceneOf(phase: RoomState["phase"]) {
   if (phase === "lobby" || phase === "podium") return phase;
@@ -237,7 +241,14 @@ export default function RoomPage() {
           <h1 className="brand-name">AUX PARTY</h1>
           <span className="brand-tag">ROOM {state.code}</span>
         </Link>
-        {auth.user ? <UserMenu /> : <span className="you-chip">{auth.displayName}</span>}
+        {auth.user ? (
+          <UserMenu />
+        ) : (
+          <span className="you-chip">
+            <Avatar id={getAvatar()} size={28} />
+            {auth.displayName}
+          </span>
+        )}
       </header>
 
       <div className="screen-stage" key={sceneOf(state.phase)}>
@@ -388,7 +399,20 @@ function Lobby({
   const canStart = connected >= minPlayers;
   const [tab, setTab] = useState<"party" | "settings">("party");
   const [playlistUrl, setPlaylistUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [volume, setVolume] = useState(() => loadPrefs().volume);
   const customMix = state.mode === "buzzer" && state.buzzerChart === "custom";
+  const needed = Math.max(0, minPlayers - connected);
+
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(state.code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   return (
     <div className="grid-2 lobby-grid">
@@ -399,14 +423,14 @@ function Lobby({
             className={`lobby-tab ${tab === "party" ? "on" : ""}`}
             onClick={() => setTab("party")}
           >
-            Party
+            <IconPeople /> Party
           </button>
           <button
             type="button"
             className={`lobby-tab ${tab === "settings" ? "on" : ""}`}
             onClick={() => setTab("settings")}
           >
-            Game settings
+            <IconGear /> Game settings
           </button>
         </div>
 
@@ -414,6 +438,41 @@ function Lobby({
           <div className="lobby-settings">
             <div className="kicker">Game settings</div>
             <h2>Tune this party</h2>
+            <p className="hint">Pick a mode, rounds, audio, and who can join.</p>
+            <div className="mode-pick-grid">
+              {GAME_MODE_ORDER.map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`mode-pick-card ${state.mode === mode ? "on" : ""}`}
+                  disabled={!youHost}
+                  onClick={() => youHost && onSend("room:set-mode", { mode })}
+                >
+                  <b>{GAME_MODE_LABELS[mode]}</b>
+                  <span>{GAME_MODE_BLURBS[mode]}</span>
+                </button>
+              ))}
+            </div>
+            <div className="field">
+              <label htmlFor="lobby-volume">In-game volume</label>
+              <div className="volume-row">
+                <input
+                  id="lobby-volume"
+                  className="volume-slider"
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={volume}
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    setVolume(next);
+                    savePrefs({ volume: next });
+                    setMasterVolume(next / 100);
+                  }}
+                />
+                <span className="volume-value">{volume}%</span>
+              </div>
+            </div>
             <div className="field" style={{ marginTop: 16 }}>
               <label>Lobby</label>
               <Dropdown
@@ -507,36 +566,61 @@ function Lobby({
                 )}
               </div>
             )}
+            <button className="start-btn settings-done" type="button" onClick={() => setTab("party")}>
+              Done
+            </button>
           </div>
         ) : (
           <>
-            <div className="kicker">Share this code</div>
-            <div className="room-code">{state.code}</div>
-            <p className="hint">Share this code so friends can drop in. The game mode is locked for this room.</p>
-            <div className="mode-lock">
-              <span className="kicker">Playing</span>
-              <strong>{MODE_COPY[state.mode].title}</strong>
-              <p>{MODE_COPY[state.mode].body}</p>
-              <p className="hint">{minPlayers} players minimum</p>
+            <div className="share-head">
+              <IconLink />
+              <p className="kicker">Share this code</p>
             </div>
-            <p className="hint">
-              {state.isPrivate ? "Private lobby" : "Public lobby"} · {state.totalRounds}{" "}
-              {state.totalRounds === 1 ? "round" : "rounds"}
-              {state.mode === "buzzer"
-                ? ` · ${BUZZER_CHARTS.find((chart) => chart.id === state.buzzerChart)?.label || "Chart"}`
-                : ""}
+            <div className="code-row">
+              <div className="room-code">{state.code}</div>
+              <button
+                className={`copy-code-btn ${copied ? "copied" : ""}`}
+                type="button"
+                onClick={() => void copyCode()}
+              >
+                <IconCopy /> {copied ? "Copied!" : "Copy Code"}
+              </button>
+            </div>
+            <div className="mode-lock">
+              <div className="mode-lock-head">
+                <span className="mode-ico" aria-hidden>
+                  <IconNote />
+                </span>
+                <div>
+                  <span className="kicker playing-dot">Playing</span>
+                  <strong>{MODE_COPY[state.mode].title}</strong>
+                </div>
+              </div>
+              <p>{MODE_COPY[state.mode].body}</p>
+            </div>
+            <p className="lobby-meta">
+              <span className="lobby-chip">
+                <IconLock />
+                {state.isPrivate ? "Private lobby" : "Public lobby"}
+              </span>
+              <span className="lobby-chip">
+                {state.totalRounds} {state.totalRounds === 1 ? "round" : "rounds"}
+              </span>
+              {state.mode === "buzzer" ? (
+                <span className="lobby-chip">
+                  {BUZZER_CHARTS.find((chart) => chart.id === state.buzzerChart)?.label || "Chart"}
+                </span>
+              ) : null}
             </p>
             {youHost ? (
-              <div className="row" style={{ marginTop: 16 }}>
-                <button
-                  className="btn btn-primary"
-                  type="button"
-                  disabled={!canStart}
-                  onClick={() => onSend("game:start")}
-                >
-                  Start {MODE_COPY[state.mode].title}
-                </button>
-              </div>
+              <button
+                className="start-btn lobby-cta"
+                type="button"
+                disabled={!canStart}
+                onClick={() => onSend("game:start")}
+              >
+                Let's Party!
+              </button>
             ) : (
               <p className="hint" style={{ marginTop: 16 }}>
                 Waiting for the host to start.
@@ -544,8 +628,7 @@ function Lobby({
             )}
             {youHost && !canStart && (
               <p className="hint" style={{ marginTop: 10 }}>
-                Wait for {minPlayers - connected} more {minPlayers - connected === 1 ? "player" : "players"} to join.
-                This mode needs {minPlayers}.
+                Wait for {needed} more {needed === 1 ? "player" : "players"} to join. This mode needs {minPlayers}.
               </p>
             )}
           </>
@@ -1180,9 +1263,7 @@ function Podium({
         )}
       </div>
       {youHost && (
-        <button className="btn btn-primary" type="button" onClick={() => onSend("game:lobby")}>
-          Back to lobby
-        </button>
+        <BackButton onClick={() => onSend("game:lobby")}>Back to lobby</BackButton>
       )}
     </div>
   );

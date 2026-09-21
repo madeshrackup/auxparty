@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AccountShell from "../components/AccountShell";
+import BackButton, { PLAY_HOME } from "../components/BackButton";
 import PasswordField from "../components/PasswordField";
 import { UserBadge } from "../components/UserMenu";
 import { useAuth } from "../useAuth";
@@ -140,6 +141,7 @@ export default function ProfilePage() {
         </div>
         <p className="error">{error}</p>
         {saved && <p className="ok-note">{saved}</p>}
+        <BackButton to={PLAY_HOME}>Back to Aux Party</BackButton>
       </section>
     </AccountShell>
   );

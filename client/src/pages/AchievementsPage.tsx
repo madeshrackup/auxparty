@@ -3,9 +3,11 @@ import { Link, useNavigate } from "react-router-dom";
 import { ACHIEVEMENTS, ACHIEVEMENT_SECTIONS, type AchievementId } from "@shared/types";
 import { getAchievements } from "../api";
 import AccountShell from "../components/AccountShell";
+import BackButton, { PLAY_HOME } from "../components/BackButton";
 import { IconLock } from "../components/PartyArt";
 import TrophyBadge from "../components/TrophyBadge";
 import { resetSocket } from "../socket";
+import { transitionNavigate } from "../transition";
 import { useAuth } from "../useAuth";
 
 export default function AchievementsPage() {
@@ -43,13 +45,18 @@ export default function AchievementsPage() {
     return selected.how;
   }, [selected, unlocked, wins]);
 
+  function goHome(event: { preventDefault: () => void }) {
+    event.preventDefault();
+    transitionNavigate(navigate, PLAY_HOME);
+  }
+
   if (!auth.user) {
     return (
       <AccountShell>
         <section className="g-card achievements-card achievements-card-locked">
           <div className="achieve-top">
             <h1 className="lime-title">Aux Party Badges</h1>
-            <Link to="/" className="achieve-close" viewTransition aria-label="Close badges">
+            <Link to="/" className="achieve-close" aria-label="Close badges" onClick={goHome}>
               ×
             </Link>
           </div>
@@ -68,6 +75,7 @@ export default function AchievementsPage() {
             </button>
           </div>
         </section>
+        <BackButton to={PLAY_HOME}>Back to Aux Party</BackButton>
       </AccountShell>
     );
   }
@@ -86,7 +94,7 @@ export default function AchievementsPage() {
               {earned}/{ACHIEVEMENTS.length}
             </b>
           </div>
-          <Link to="/" className="achieve-close" viewTransition aria-label="Close badges">
+          <Link to="/" className="achieve-close" aria-label="Close badges" onClick={goHome}>
             ×
           </Link>
         </div>
@@ -122,6 +130,7 @@ export default function AchievementsPage() {
           );
         })}
       </section>
+      <BackButton to={PLAY_HOME}>Back to Aux Party</BackButton>
     </AccountShell>
   );
 }

@@ -59,7 +59,9 @@ export default function UserMenu() {
         aria-label={`${user.username} account menu`}
         onClick={() => setOpen((v) => !v)}
       >
-        <UserBadge user={user} />
+        <UserBadge user={user} size={34} />
+        <span className="user-menu-name">{user.username}</span>
+        <span className="user-menu-chevron" aria-hidden />
       </button>
       {open && (
         <div className="user-menu-drop" role="menu">

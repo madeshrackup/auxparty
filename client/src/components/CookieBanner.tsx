@@ -37,8 +37,8 @@ export default function CookieBanner() {
   return (
     <div className="cookie-banner" role="region" aria-label="Cookie notice">
       <p>
-        Aux Party uses an essential login cookie and stores your guest nickname on this device. No ad
-        trackers.{" "}
+        Aux Party uses essential cookies for login and to remember game settings on this browser.
+        Guest nickname stays on this device. No ad trackers.{" "}
         <Link to="/cookies" viewTransition>
           Cookie policy
         </Link>

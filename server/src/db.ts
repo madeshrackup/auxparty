@@ -1,5 +1,11 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { emptyPlayerStats, GAME_MODE_ORDER, type GameMode, type PlayerStats } from "../../shared/types.ts";
+import {
+  emptyPlayerStats,
+  GAME_MODE_ORDER,
+  type AchievementId,
+  type GameMode,
+  type PlayerStats,
+} from "../../shared/types.ts";
 import { IS_PROD, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL } from "./env.ts";
 import { assertUuid, isUuid, sanitizeText } from "./security.ts";
 
@@ -723,21 +729,21 @@ export async function listFriendMessages(userId: string, otherId: string, limit 
   return rows.slice(-limit);
 }
 
-export async function grantAchievement(userId: string, achievementId: string): Promise<void> {
+export async function grantAchievement(userId: string, achievementId: string): Promise<boolean> {
   try {
-    const { error } = await sb().from("achievements").upsert(
-      {
-        user_id: userId,
-        achievement_id: achievementId,
-      },
-      { onConflict: "user_id,achievement_id", ignoreDuplicates: true },
-    );
-    if (error && !/achievements|schema cache|does not exist/i.test(error.message || "")) {
-      return;
+    const { error } = await sb().from("achievements").insert({
+      user_id: userId,
+      achievement_id: achievementId,
+    });
+    if (!error) return true;
+    if (error.code === "23505") return false;
+    if (!/achievements|schema cache|does not exist|duplicate/i.test(error.message || "")) {
+      return false;
     }
   } catch {
     /* trophies stay optional until schema-achievements.sql is applied */
   }
+  return false;
 }
 
 export async function loadAchievements(userId: string): Promise<{
@@ -809,7 +815,8 @@ export async function loadStats(userId: string): Promise<PlayerStats> {
 export async function recordMatchStats(
   mode: GameMode,
   entries: { userId: string; score: number; won: boolean }[],
-): Promise<void> {
+): Promise<{ userId: string; id: AchievementId }[]> {
+  const granted: { userId: string; id: AchievementId }[] = [];
   const unique = new Map<string, { userId: string; score: number; won: boolean }>();
   for (const entry of entries) {
     if (entry.userId) unique.set(entry.userId, entry);
@@ -826,8 +833,12 @@ export async function recordMatchStats(
         if (slim.error) continue;
         const wins = asInt((slim.data as { wins?: number } | null)?.wins) + 1;
         const { error } = await sb().from("accounts").update({ wins }).eq("id", entry.userId);
-        if (!error && wins >= 100) await grantAchievement(entry.userId, "maestro");
-        if (!error && wins === 1) await grantAchievement(entry.userId, "first_of_many");
+        if (!error && wins === 1 && (await grantAchievement(entry.userId, "first_of_many"))) {
+          granted.push({ userId: entry.userId, id: "first_of_many" });
+        }
+        if (!error && wins >= 100 && (await grantAchievement(entry.userId, "maestro"))) {
+          granted.push({ userId: entry.userId, id: "maestro" });
+        }
       }
       continue;
     }
@@ -845,7 +856,12 @@ export async function recordMatchStats(
       .update({ wins, points, mode_stats: modes })
       .eq("id", entry.userId);
     if (error) continue;
-    if (entry.won && wins === 1) await grantAchievement(entry.userId, "first_of_many");
-    if (wins >= 100) await grantAchievement(entry.userId, "maestro");
+    if (entry.won && wins === 1 && (await grantAchievement(entry.userId, "first_of_many"))) {
+      granted.push({ userId: entry.userId, id: "first_of_many" });
+    }
+    if (wins >= 100 && (await grantAchievement(entry.userId, "maestro"))) {
+      granted.push({ userId: entry.userId, id: "maestro" });
+    }
   }
+  return granted;
 }

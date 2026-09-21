@@ -147,6 +147,7 @@ export class Room {
   private impostorMasterEligible = new Map<string, number>();
 
   onChange: (() => void) | null = null;
+  onAchievement: ((playerId: string, id: AchievementId) => void) | null = null;
   onEmpty: (() => void) | null = null;
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
   private dropTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -182,7 +183,11 @@ export class Room {
   private unlockTrophy(playerId: string, id: AchievementId) {
     const player = this.player(playerId);
     if (!player || player.isGuest) return;
-    void grantAchievement(player.id, id).catch(() => {});
+    void grantAchievement(player.id, id)
+      .then((fresh) => {
+        if (fresh) this.onAchievement?.(playerId, id);
+      })
+      .catch(() => {});
   }
 
   private resetTrophyTracking() {
@@ -1260,7 +1265,11 @@ export class Room {
             score: player.score,
             won: player.score === best,
           })),
-      ).catch(() => {});
+      )
+        .then((granted) => {
+          for (const row of granted) this.onAchievement?.(row.userId, row.id);
+        })
+        .catch(() => {});
       this.unlockEndOfMatchTrophies();
     }
     this.emit();
@@ -1508,11 +1517,15 @@ export class RoomManager {
     return undefined;
   }
 
-  create(identity: Identity, mode?: GameMode, isPrivate = true) {
+  create(identity: Identity, mode?: GameMode, isPrivate = true, totalRounds?: number) {
     const code = makeRoomCode(new Set(this.rooms.keys()));
     const room = new Room(code, identity);
     if (mode) room.mode = mode;
     room.isPrivate = Boolean(isPrivate);
+    const rounds = Math.round(Number(totalRounds));
+    if (Number.isFinite(rounds) && rounds >= MIN_ROUNDS && rounds <= MAX_ROUNDS) {
+      room.totalRounds = rounds;
+    }
     room.onEmpty = () => this.remove(code);
     this.rooms.set(code, room);
     return room;

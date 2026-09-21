@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Avatar from "../components/Avatar";
 import ModeGlyph from "../components/ModeGlyph";
 import {
-  IconPeople,
   PersonBadge,
   VibeIcon,
   VinylBadge,
@@ -18,8 +17,11 @@ import { useAuth } from "../useAuth";
 import { getAvatar, nextAvatar, setAvatar, type AvatarId } from "../identity";
 import { runViewTransition } from "../transition";
 import FriendsPanel from "../components/FriendsPanel";
+import { CreditsCard, GameSettingsCard, StatsOverviewCard } from "../components/PlayExtras";
 import TrophyLink from "../components/TrophyLink";
 import UserMenu from "../components/UserMenu";
+import BackButton from "../components/BackButton";
+import { loadPrefs } from "../prefs";
 import { GAME_MODE_BLURBS, GAME_MODE_LABELS, GAME_MODE_ORDER, MIN_PLAYERS, type GameMode } from "@shared/types";
 
 const HOWTO = [
@@ -63,13 +65,19 @@ const HOST_STEPS: { tone: GameMode; title: string; blurb: string }[] = [
   { tone: "aux", title: "Start the mix", blurb: "Set the rounds, then let the clips fly." },
 ];
 
+const PLAY_HUB_PAGES = 2;
+
 export default function Landing() {
   const auth = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<"anon" | "auth">(auth.user ? "auth" : "anon");
-  const [screen, setScreen] = useState<"identity" | "play" | "modes">("identity");
+  const [screen, setScreen] = useState<"identity" | "play" | "modes">(() =>
+    searchParams.get("play") === "1" ? "play" : "identity",
+  );
+  const [hubPage, setHubPage] = useState(0);
+  const swipeRef = useRef<{ x: number; page: number } | null>(null);
   const [avatar, setAvatarState] = useState<AvatarId>(getAvatar);
   const [code, setCode] = useState("");
   const [slide, setSlide] = useState(0);
@@ -106,7 +114,16 @@ export default function Landing() {
 
   function goScreen(next: "identity" | "play" | "modes") {
     if (next === screen) return;
-    runViewTransition(() => setScreen(next));
+    if (next !== "play") setHubPage(0);
+    runViewTransition(() => {
+      setScreen(next);
+      const onPlay = searchParams.get("play") === "1";
+      if (next === "identity") {
+        if (onPlay) setSearchParams({}, { replace: true });
+      } else if (!onPlay) {
+        setSearchParams({ play: "1" }, { replace: true });
+      }
+    });
   }
 
   function startParty() {
@@ -126,10 +143,11 @@ export default function Landing() {
     unlockAudio();
     try {
       const sock = getSocket(name, asGuest, asGuest ? null : auth.user?.avatarUrl, asGuest ? null : auth.playToken);
+      const prefs = loadPrefs();
       const res = await emitAck<{ ok: boolean; error?: string; code?: string }>(
         sock,
         "room:create",
-        { name, avatar, mode },
+        { name, avatar, mode, isPrivate: prefs.privateLobby, totalRounds: prefs.rounds },
       );
       if (!res.ok || !res.code) throw new Error(res.error || "Could not create room.");
       navigate(`/room/${res.code}`, { viewTransition: true });
@@ -249,9 +267,14 @@ export default function Landing() {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    if (params.get("signup") !== "1") return;
-    openSignup();
-    setSearchParams({}, { replace: true });
+    if (params.get("signup") === "1") {
+      openSignup();
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    if (params.get("play") === "1") {
+      setScreen((current) => (current === "identity" ? "play" : current));
+    }
   }, [location.search]);
 
   useEffect(() => {
@@ -261,6 +284,21 @@ export default function Landing() {
       document.getElementById("how-to-play")?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }, [location.hash]);
+
+  useEffect(() => {
+    if (screen !== "play") return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) return;
+      }
+      if (event.key === "ArrowRight") setHubPage((page) => Math.min(PLAY_HUB_PAGES - 1, page + 1));
+      if (event.key === "ArrowLeft") setHubPage((page) => Math.max(0, page - 1));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [screen]);
 
   return (
     <div className="home">
@@ -294,21 +332,17 @@ export default function Landing() {
           <h1 className="brand-name">AUX PARTY</h1>
           <span className="brand-tag">THE MUSIC QUIZ</span>
         </Link>
-        {screen !== "identity" && auth.user ? (
-          <UserMenu />
-        ) : (
-          <span className="live-pill">
-            <IconPeople /> PARTY MODE
-          </span>
-        )}
+        {auth.user ? <UserMenu /> : null}
       </header>
 
       {screen === "identity" ? (
         <main key="identity" className="screen-stage home-grid">
           <section className="identity-wrap" data-tab={tab}>
-            <div className="folder-tabs">
+            <div className="folder-tabs" role="tablist" aria-label="Play as">
               <button
                 type="button"
+                role="tab"
+                aria-selected={tab === "anon"}
                 className={`folder-tab ${tab === "anon" ? "on" : ""}`}
                 onClick={() => {
                   resetSocket();
@@ -320,6 +354,8 @@ export default function Landing() {
               </button>
               <button
                 type="button"
+                role="tab"
+                aria-selected={tab === "auth"}
                 className={`folder-tab ${tab === "auth" ? "on" : ""}`}
                 onClick={() => {
                   resetSocket();
@@ -405,17 +441,15 @@ export default function Landing() {
                       Send reset email
                     </button>
                   )}
-                  <button
-                    className="text-link"
-                    type="button"
+                  <BackButton
                     onClick={() => {
                       setAuthMode("login");
                       setForgotSent(false);
                       setError("");
                     }}
                   >
-                    Back to log in
-                  </button>
+                    Back to login
+                  </BackButton>
                 </div>
               </form>
             ) : (
@@ -624,12 +658,49 @@ export default function Landing() {
             ))}
           </div>
           <p className="error play-error">{error}</p>
-          <button className="text-link back-link" type="button" onClick={() => goScreen("play")}>
-            ‹ Back to create / join
-          </button>
+          <BackButton onClick={() => goScreen("play")}>Back to create / join</BackButton>
         </main>
       ) : (
-        <main key="play" className="screen-stage play-grid">
+        <main key="play" className="screen-stage play-hub">
+          <button
+            type="button"
+            className="play-hub-arrow left"
+            aria-label="Previous cards"
+            disabled={hubPage <= 0}
+            onClick={() => setHubPage((page) => Math.max(0, page - 1))}
+          >
+            ‹
+          </button>
+          <div
+            className="play-hub-viewport"
+            onPointerDown={(event) => {
+              const target = event.target;
+              if (
+                target instanceof HTMLElement &&
+                target.closest("button, input, a, textarea, select, .dropdown")
+              ) {
+                swipeRef.current = null;
+                return;
+              }
+              swipeRef.current = { x: event.clientX, page: hubPage };
+            }}
+            onPointerUp={(event) => {
+              const start = swipeRef.current;
+              swipeRef.current = null;
+              if (!start) return;
+              const dx = event.clientX - start.x;
+              if (dx < -48) setHubPage(Math.min(PLAY_HUB_PAGES - 1, start.page + 1));
+              if (dx > 48) setHubPage(Math.max(0, start.page - 1));
+            }}
+            onPointerCancel={() => {
+              swipeRef.current = null;
+            }}
+          >
+            <div
+              className="play-hub-track"
+              style={{ transform: `translateX(calc(${hubPage} * -1 * (100% + var(--hub-gap))))` }}
+            >
+              <div className="play-grid play-hub-page" {...(hubPage !== 0 ? { inert: true } : {})}>
           <section className="g-card play-card create-card">
             <div className="play-hero">
               <VinylBadge />
@@ -711,10 +782,35 @@ export default function Landing() {
             </section>
             <FriendsPanel onRegister={openSignup} />
           </div>
-          <p className="error play-error">{error}</p>
-          <button className="text-link back-link back-pill" type="button" onClick={() => goScreen("identity")}>
-            ‹ Back to character
+              </div>
+              <div className="play-grid play-hub-page play-hub-extras" {...(hubPage !== 1 ? { inert: true } : {})}>
+                <StatsOverviewCard onRegister={openSignup} />
+                <div className="play-side-stack">
+                  <GameSettingsCard />
+                  <CreditsCard />
+                </div>
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="play-hub-arrow right"
+            aria-label="More cards"
+            disabled={hubPage >= PLAY_HUB_PAGES - 1}
+            onClick={() => setHubPage((page) => Math.min(PLAY_HUB_PAGES - 1, page + 1))}
+          >
+            ›
           </button>
+          <p className="error play-error">{error}</p>
+          <BackButton
+            onClick={() => {
+              setTab("auth");
+              setAuthMode("login");
+              goScreen("identity");
+            }}
+          >
+            Back to login
+          </BackButton>
         </main>
       )}
     </div>
