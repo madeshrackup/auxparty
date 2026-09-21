@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 // Auth graph cannot named-import from shared/*.ts on Vercel (those files compile as CJS).
+// Do not spread VercelRequest — headers are not enumerable.
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { authAction } = await import("../../../server/src/vercel-routes.ts");

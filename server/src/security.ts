@@ -20,7 +20,8 @@ const buckets = new Map<string, { count: number; reset: number }>();
 let lastSweep = 0;
 
 function header(req: GuardRequest, name: string): string {
-  const raw = req.headers[name] ?? req.headers[name.toLowerCase()];
+  const headers = req.headers || {};
+  const raw = headers[name] ?? headers[name.toLowerCase()];
   if (Array.isArray(raw)) return String(raw[0] || "");
   return String(raw || "");
 }

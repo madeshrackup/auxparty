@@ -49,7 +49,17 @@ function bodyOf(req: VercelRequest) {
 }
 
 function cookiesOf(req: VercelRequest) {
-  return { ...parseCookie(req.headers.cookie || ""), ...(req.cookies || {}) };
+  return { ...parseCookie(req.headers?.cookie || ""), ...(req.cookies || {}) };
+}
+
+function toGuard(req: VercelRequest): GuardRequest {
+  return {
+    method: req.method,
+    url: req.url,
+    originalUrl: req.url,
+    headers: { ...(req.headers || {}) },
+    cookies: cookiesOf(req),
+  };
 }
 
 function sidOf(req: VercelRequest) {
@@ -57,7 +67,7 @@ function sidOf(req: VercelRequest) {
 }
 
 function auditOf(req: VercelRequest) {
-  return { ip: clientIp(req as GuardRequest) };
+  return { ip: clientIp(toGuard(req)) };
 }
 
 export function sendAuthError(res: VercelResponse, err: unknown, fallback: string) {
@@ -125,7 +135,7 @@ function ensureCsrf(req: VercelRequest, res: VercelResponse) {
 
 function guard(req: VercelRequest, res: VercelResponse): boolean {
   applySecurityHeaders(res);
-  const request = { ...req, cookies: cookiesOf(req) } as GuardRequest;
+  const request = toGuard(req);
   if (!csrfAllowed(request)) {
     void logSecurityEvent("csrf_reject", { ip: clientIp(request), detail: "origin" });
     res.status(403).json({ error: "Forbidden origin." });
