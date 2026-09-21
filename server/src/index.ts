@@ -643,7 +643,7 @@ io.on("connection", (socket) => {
   });
 });
 
-assertProductionEnv();
+assertProductionEnv("game");
 server.listen(PORT, () => {
   console.log(`Aux Party API on http://localhost:${PORT}`);
 });

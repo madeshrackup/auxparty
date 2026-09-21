@@ -30,6 +30,22 @@ function originFromHost(host?: string) {
   return (host.startsWith("http") ? host : `https://${host}`).replace(/\/$/, "");
 }
 
+function withWwwOrigins(origin: string): string[] {
+  try {
+    const url = new URL(origin);
+    const host = url.hostname;
+    const alt = host.startsWith("www.") ? host.slice(4) : `www.${host}`;
+    return [origin, `${url.protocol}//${alt}`.replace(/\/$/, "")];
+  } catch {
+    return [origin];
+  }
+}
+
+export function isSocketPath(req: { originalUrl?: string; url?: string }): boolean {
+  const path = String(req.originalUrl || req.url || "").split("?")[0];
+  return path === "/socket.io" || path.startsWith("/socket.io/");
+}
+
 export function allowedOrigins(): string[] {
   const raw = process.env.CORS_ORIGIN || APP_URL || "http://localhost:5173";
   const list = raw
@@ -37,7 +53,10 @@ export function allowedOrigins(): string[] {
     .map((item) => item.trim().replace(/\/$/, ""))
     .filter((item) => item && item !== "*" && !item.includes("*"));
   for (const extra of [APP_URL, originFromHost(process.env.VERCEL_URL)]) {
-    if (extra && extra !== "*" && !list.includes(extra)) list.push(extra);
+    if (!extra || extra === "*") continue;
+    for (const origin of withWwwOrigins(extra)) {
+      if (!list.includes(origin)) list.push(origin);
+    }
   }
   if (!IS_PROD) {
     for (const local of LOCAL_ORIGINS) {

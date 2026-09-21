@@ -99,9 +99,8 @@ export function ensureConnected(sock: Socket, timeoutMs = CONNECT_MS): Promise<v
       else resolve();
     };
     const onConnect = () => finish();
-    const onError = (err: Error) => {
-      if (sock.active) return;
-      finish(err);
+    const onError = (_err: Error) => {
+      finish(new Error("Can't reach the party server. Try again in a moment."));
     };
     const timer = window.setTimeout(() => {
       finish(new Error("Can't reach the party server. Try again in a moment."));

@@ -34,19 +34,22 @@ import {
   corsOriginOption,
   csrfAllowed,
   csrfTokenAllowed,
+  isSocketPath,
   publicError,
 } from "./security.ts";
 
 export const app = express();
 app.disable("x-powered-by");
 if (IS_PROD) app.set("trust proxy", 1);
-app.use((_req, res, next) => {
+app.use((req, res, next) => {
+  if (isSocketPath(req)) return;
   applySecurityHeaders(res);
   next();
 });
 app.use(cors({ origin: corsOriginOption(), credentials: true }));
 app.use(cookieParser());
 app.use((req, res, next) => {
+  if (isSocketPath(req)) return;
   if (!csrfAllowed(req)) {
     void logSecurityEvent("csrf_reject", { ip: clientIp(req), detail: "origin" });
     res.status(403).json({ error: "Forbidden origin." });
