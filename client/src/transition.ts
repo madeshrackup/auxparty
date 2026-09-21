@@ -11,14 +11,6 @@ type ViewTransitionDocument = Document & {
 
 let active: Promise<unknown> | null = null;
 
-function nextPaint() {
-  return new Promise<void>((resolve) => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => resolve());
-    });
-  });
-}
-
 export function runViewTransition(update: () => void) {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const start = (document as ViewTransitionDocument).startViewTransition?.bind(document);
@@ -27,10 +19,8 @@ export function runViewTransition(update: () => void) {
     return;
   }
   try {
-    const vt = start(async () => {
+    const vt = start(() => {
       flushSync(update);
-      // React Router navigations are concurrent; wait until the new route commits.
-      await nextPaint();
     });
     active = Promise.race([
       Promise.resolve(vt.finished ?? undefined),
